@@ -1,11 +1,15 @@
 import {
   Archive,
   Brain,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   Clock3,
+  Edit3,
   HardDrive,
   LayoutDashboard,
   Moon,
+  Plus,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -61,6 +65,19 @@ type SearchResult = {
   reasons: string[];
 };
 
+type ReplyContextMessage = {
+  role: string;
+  content: string;
+};
+
+type ReplyContextPreview = {
+  messages: ReplyContextMessage[];
+  metadata: Record<string, unknown>;
+  used_memory_ids: number[];
+  memory_count: number;
+  memory_injection_enabled: boolean;
+};
+
 type SearchForm = {
   user_id: string;
   group_id: string;
@@ -77,6 +94,19 @@ type MemoryFilters = {
   memory_type: string;
 };
 
+type MemoryForm = {
+  user_id: string;
+  display_name: string;
+  group_id: string;
+  private: boolean;
+  memory_text: string;
+  memory_type: string;
+  confidence: number;
+  source_text: string;
+  status: "active" | "archived";
+  merge_reason: string;
+};
+
 type MemoryStatusFilter = "active" | "archived" | "all";
 type PageKey = "overview" | "memories" | "search" | "status" | "reserved";
 type ThemeMode = "light" | "dark";
@@ -89,6 +119,7 @@ type NavItem = {
 
 const adminTokenStorageKey = "kaka_admin_token";
 const themeStorageKey = "kaka_admin_theme";
+const memoryPageSize = 50;
 
 const memoryStatusOptions: { value: MemoryStatusFilter; label: string }[] = [
   { value: "active", label: "使用中" },
@@ -144,6 +175,19 @@ const emptyMemoryFilters: MemoryFilters = {
   group_id: "",
   date: "",
   memory_type: ""
+};
+
+const emptyMemoryForm: MemoryForm = {
+  user_id: "",
+  display_name: "",
+  group_id: "",
+  private: false,
+  memory_text: "",
+  memory_type: "user_fact",
+  confidence: 0.8,
+  source_text: "",
+  status: "active",
+  merge_reason: ""
 };
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
@@ -278,9 +322,15 @@ export function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [replyContextPreview, setReplyContextPreview] = useState<ReplyContextPreview | null>(null);
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatusFilter>("active");
   const [memoryFilters, setMemoryFilters] = useState<MemoryFilters>(emptyMemoryFilters);
+  const [memoryPage, setMemoryPage] = useState(1);
+  const [memoryTotal, setMemoryTotal] = useState(0);
   const [selectedMemories, setSelectedMemories] = useState<Set<number>>(new Set());
+  const [memoryFormMode, setMemoryFormMode] = useState<"create" | "edit" | null>(null);
+  const [memoryForm, setMemoryForm] = useState<MemoryForm>(emptyMemoryForm);
+  const [editingMemoryId, setEditingMemoryId] = useState<number | null>(null);
   const [searchForm, setSearchForm] = useState<SearchForm>({
     user_id: "",
     group_id: "",
@@ -311,6 +361,7 @@ export function App() {
   const allVisibleSelected = memories.length > 0 && memories.every((memory) => selectedMemories.has(memory.id));
   const isBusy = Boolean(busyLabel);
   const currentPage = pageCopy[activePage];
+  const memoryTotalPages = Math.max(1, Math.ceil(memoryTotal / memoryPageSize));
 
   async function run(
     label: string,
@@ -335,7 +386,7 @@ export function App() {
   }
 
   async function refreshAll() {
-    await Promise.all([refreshSummary(), refreshMemories(memoryStatus, memoryFilters)]);
+    await Promise.all([refreshSummary(), refreshMemories(memoryStatus, memoryFilters, memoryPage)]);
   }
 
   async function refreshSummary() {
@@ -343,10 +394,21 @@ export function App() {
     setSummary(data);
   }
 
-  async function refreshMemories(status = memoryStatus, filters = memoryFilters) {
-    const query = buildQuery({ limit: 80, status, ...filters });
-    const data = await api<{ items: Memory[] }>(`/memories?${query}`);
+  async function refreshMemories(status = memoryStatus, filters = memoryFilters, page = memoryPage) {
+    const safePage = Math.max(1, page);
+    const offset = (safePage - 1) * memoryPageSize;
+    const query = buildQuery({ limit: memoryPageSize, offset, status, ...filters });
+    const data = await api<{ items: Memory[]; total: number; limit: number; offset: number }>(`/memories?${query}`);
+    if (data.total > 0 && data.items.length === 0 && safePage > 1) {
+      const lastPage = Math.max(1, Math.ceil(data.total / memoryPageSize));
+      if (lastPage !== safePage) {
+        await refreshMemories(status, filters, lastPage);
+        return;
+      }
+    }
     setMemories(data.items);
+    setMemoryTotal(data.total);
+    setMemoryPage(data.total === 0 ? 1 : Math.max(1, Math.floor(data.offset / (data.limit || memoryPageSize)) + 1));
     setSelectedMemories(new Set());
   }
 
@@ -361,16 +423,21 @@ export function App() {
 
   function changeMemoryStatus(value: MemoryStatusFilter) {
     setMemoryStatus(value);
-    void run("刷新记忆", () => refreshMemories(value, memoryFilters), { quietSuccess: true });
+    void run("刷新记忆", () => refreshMemories(value, memoryFilters, 1), { quietSuccess: true });
   }
 
   function applyFilters() {
-    void run("刷新记忆", () => refreshMemories(memoryStatus, memoryFilters), { quietSuccess: true });
+    void run("刷新记忆", () => refreshMemories(memoryStatus, memoryFilters, 1), { quietSuccess: true });
   }
 
   function clearFilters() {
     setMemoryFilters(emptyMemoryFilters);
-    void run("刷新记忆", () => refreshMemories(memoryStatus, emptyMemoryFilters), { quietSuccess: true });
+    void run("刷新记忆", () => refreshMemories(memoryStatus, emptyMemoryFilters, 1), { quietSuccess: true });
+  }
+
+  function changeMemoryPage(page: number) {
+    if (page < 1 || page > memoryTotalPages || page === memoryPage) return;
+    void run("刷新记忆", () => refreshMemories(memoryStatus, memoryFilters, page), { quietSuccess: true });
   }
 
   function toggleSelection(id: number) {
@@ -393,6 +460,59 @@ export function App() {
     setSelectedMemories(next);
   }
 
+  function startCreateMemory() {
+    setMemoryFormMode("create");
+    setEditingMemoryId(null);
+    setMemoryForm(emptyMemoryForm);
+  }
+
+  function startEditMemory() {
+    if (selectedMemoryIds.length !== 1) return;
+    const memory = memories.find((item) => item.id === selectedMemoryIds[0]);
+    if (!memory) return;
+    setMemoryFormMode("edit");
+    setEditingMemoryId(memory.id);
+    setMemoryForm({
+      user_id: memory.user?.platform_user_id ?? "",
+      display_name: memory.user?.display_name ?? "",
+      group_id: memory.scene?.scene_type === "group" ? memory.scene.scene_id : "",
+      private: memory.scene?.scene_type === "private",
+      memory_text: memory.memory_text,
+      memory_type: memory.memory_type || "user_fact",
+      confidence: memory.confidence,
+      source_text: memory.source_text || "",
+      status: memory.status === "archived" ? "archived" : "active",
+      merge_reason: memory.merge_reason || ""
+    });
+  }
+
+  function cancelMemoryForm() {
+    setMemoryFormMode(null);
+    setEditingMemoryId(null);
+    setMemoryForm(emptyMemoryForm);
+  }
+
+  async function submitMemoryForm() {
+    if (!memoryFormMode) return;
+    const mode = memoryFormMode;
+    await run(memoryFormMode === "create" ? "新增记忆" : "保存记忆", async () => {
+      if (mode === "create") {
+        await api<{ item: Memory }>("/memories", {
+          method: "POST",
+          body: JSON.stringify(memoryForm)
+        });
+      } else if (editingMemoryId !== null) {
+        await api<{ item: Memory }>(`/memories/${editingMemoryId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ ...memoryForm, scene_update: true })
+        });
+      }
+      cancelMemoryForm();
+      await Promise.all([refreshMemories(memoryStatus, memoryFilters, memoryPage), refreshSummary()]);
+      return mode === "create" ? "新增记忆完成" : "保存记忆完成";
+    });
+  }
+
   async function updateMemoryStatus(status: "active" | "archived") {
     if (!selectedMemories.size) return;
     const action = status === "active" ? "恢复" : "归档";
@@ -404,7 +524,7 @@ export function App() {
         method: "POST",
         body: JSON.stringify({ ids, status })
       });
-      await Promise.all([refreshMemories(memoryStatus, memoryFilters), refreshSummary()]);
+      await Promise.all([refreshMemories(memoryStatus, memoryFilters, memoryPage), refreshSummary()]);
       return `匹配 ${result.matched} 条，更新 ${result.updated} 条`;
     });
   }
@@ -419,19 +539,26 @@ export function App() {
         method: "POST",
         body: JSON.stringify({ ids, confirm: true })
       });
-      await Promise.all([refreshMemories(memoryStatus, memoryFilters), refreshSummary()]);
+      await Promise.all([refreshMemories(memoryStatus, memoryFilters, memoryPage), refreshSummary()]);
       return `删除 ${result.deleted} 条`;
     });
   }
 
   async function searchMemories() {
     await run("检索记忆", async () => {
-      const data = await api<{ items: SearchResult[] }>("/memories/search", {
-        method: "POST",
-        body: JSON.stringify(searchForm)
-      });
-      setSearchResults(data.items);
-      return `命中 ${data.items.length} 条`;
+      const [searchData, contextData] = await Promise.all([
+        api<{ items: SearchResult[] }>("/memories/search", {
+          method: "POST",
+          body: JSON.stringify(searchForm)
+        }),
+        api<ReplyContextPreview>("/reply-context/preview", {
+          method: "POST",
+          body: JSON.stringify(searchForm)
+        })
+      ]);
+      setSearchResults(searchData.items);
+      setReplyContextPreview(contextData);
+      return `命中 ${searchData.items.length} 条，已生成回复上下文预览`;
     });
   }
 
@@ -541,16 +668,28 @@ export function App() {
               isBusy={isBusy}
               memories={memories}
               memoryStatus={memoryStatus}
+              page={memoryPage}
+              pageSize={memoryPageSize}
               selectedMemories={selectedMemories}
               selectedMemoryIds={selectedMemoryIds}
+              total={memoryTotal}
+              totalPages={memoryTotalPages}
+              form={memoryForm}
+              formMode={memoryFormMode}
               onApplyFilters={applyFilters}
+              onChangePage={changeMemoryPage}
               onChangeFilters={setMemoryFilters}
               onChangeStatus={changeMemoryStatus}
+              onChangeForm={setMemoryForm}
               onClearFilters={clearFilters}
+              onCancelForm={cancelMemoryForm}
+              onCreate={startCreateMemory}
               onDelete={() => void deleteSelectedMemories()}
+              onEdit={startEditMemory}
               onRefresh={() =>
-                void run("刷新记忆", () => refreshMemories(memoryStatus, memoryFilters), { quietSuccess: true })
+                void run("刷新记忆", () => refreshMemories(memoryStatus, memoryFilters, memoryPage), { quietSuccess: true })
               }
+              onSubmitForm={() => void submitMemoryForm()}
               onToggleAll={toggleAllVisible}
               onToggleSelection={toggleSelection}
               onUpdateStatus={(status) => void updateMemoryStatus(status)}
@@ -560,6 +699,7 @@ export function App() {
             <SearchPage
               disabled={isBusy}
               form={searchForm}
+              preview={replyContextPreview}
               results={searchResults}
               onChange={setSearchForm}
               onSubmit={() => void searchMemories()}
@@ -648,14 +788,26 @@ function MemoriesPage({
   isBusy,
   memories,
   memoryStatus,
+  page,
+  pageSize,
   selectedMemories,
   selectedMemoryIds,
+  total,
+  totalPages,
+  form,
+  formMode,
   onApplyFilters,
+  onChangePage,
   onChangeFilters,
   onChangeStatus,
+  onChangeForm,
   onClearFilters,
+  onCancelForm,
+  onCreate,
   onDelete,
+  onEdit,
   onRefresh,
+  onSubmitForm,
   onToggleAll,
   onToggleSelection,
   onUpdateStatus
@@ -665,24 +817,41 @@ function MemoriesPage({
   isBusy: boolean;
   memories: Memory[];
   memoryStatus: MemoryStatusFilter;
+  page: number;
+  pageSize: number;
   selectedMemories: Set<number>;
   selectedMemoryIds: number[];
+  total: number;
+  totalPages: number;
+  form: MemoryForm;
+  formMode: "create" | "edit" | null;
   onApplyFilters: () => void;
+  onChangePage: (page: number) => void;
   onChangeFilters: (filters: MemoryFilters) => void;
   onChangeStatus: (value: MemoryStatusFilter) => void;
+  onChangeForm: (form: MemoryForm) => void;
   onClearFilters: () => void;
+  onCancelForm: () => void;
+  onCreate: () => void;
   onDelete: () => void;
+  onEdit: () => void;
   onRefresh: () => void;
+  onSubmitForm: () => void;
   onToggleAll: () => void;
   onToggleSelection: (id: number) => void;
   onUpdateStatus: (status: "active" | "archived") => void;
 }) {
+  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const end = Math.min(total, page * pageSize);
+
   return (
     <section className="panel memory-panel">
       <div className="panel-header">
         <div>
           <h2>正式记忆</h2>
-          <span>当前显示 {memories.length} 条，已选 {selectedMemories.size} 条</span>
+          <span>
+            第 {page} / {totalPages} 页，当前 {start}-{end} 条，共 {total} 条，已选 {selectedMemories.size} 条
+          </span>
         </div>
       </div>
 
@@ -699,6 +868,37 @@ function MemoriesPage({
         </label>
         <SelectionText ids={selectedMemoryIds} />
         <div className="toolbar-actions">
+          <button className="secondary" disabled={isBusy} onClick={onCreate} type="button">
+            <Plus size={16} />
+            新增
+          </button>
+          <button className="secondary" disabled={isBusy || selectedMemoryIds.length !== 1} onClick={onEdit} type="button">
+            <Edit3 size={16} />
+            编辑
+          </button>
+          <div className="pagination-controls" aria-label="正式记忆分页">
+            <button
+              className="icon-button secondary"
+              disabled={isBusy || page <= 1}
+              onClick={() => onChangePage(page - 1)}
+              title="上一页"
+              type="button"
+            >
+              <ChevronLeft size={17} />
+            </button>
+            <span>
+              {page} / {totalPages}
+            </span>
+            <button
+              className="icon-button secondary"
+              disabled={isBusy || page >= totalPages}
+              onClick={() => onChangePage(page + 1)}
+              title="下一页"
+              type="button"
+            >
+              <ChevronRight size={17} />
+            </button>
+          </div>
           <button className="secondary" disabled={isBusy} onClick={onRefresh} type="button">
             <RefreshCw size={16} />
             刷新
@@ -717,6 +917,17 @@ function MemoriesPage({
           </button>
         </div>
       </div>
+
+      {formMode && (
+        <MemoryEditForm
+          disabled={isBusy}
+          form={form}
+          mode={formMode}
+          onCancel={onCancelForm}
+          onChange={onChangeForm}
+          onSubmit={onSubmitForm}
+        />
+      )}
 
       <FilterBar filters={filters} onChange={onChangeFilters} onClear={onClearFilters} onSubmit={onApplyFilters} />
 
@@ -766,19 +977,127 @@ function MemoriesPage({
   );
 }
 
+function MemoryEditForm({
+  disabled,
+  form,
+  mode,
+  onCancel,
+  onChange,
+  onSubmit
+}: {
+  disabled: boolean;
+  form: MemoryForm;
+  mode: "create" | "edit";
+  onCancel: () => void;
+  onChange: (form: MemoryForm) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="memory-form">
+      <div className="memory-form-head">
+        <div>
+          <h3>{mode === "create" ? "新增正式记忆" : "编辑正式记忆"}</h3>
+          <span>手动写入的记忆来源会标记为 manual。</span>
+        </div>
+        <div className="memory-form-actions">
+          <button className="secondary" disabled={disabled} onClick={onCancel} type="button">
+            取消
+          </button>
+          <button disabled={disabled || !form.user_id || !form.memory_text || !form.memory_type} onClick={onSubmit} type="button">
+            保存
+          </button>
+        </div>
+      </div>
+      <div className="memory-form-grid">
+        <label>
+          <span>用户号</span>
+          <input value={form.user_id} onChange={(event) => onChange({ ...form, user_id: event.target.value })} />
+        </label>
+        <label>
+          <span>显示名</span>
+          <input value={form.display_name} onChange={(event) => onChange({ ...form, display_name: event.target.value })} />
+        </label>
+        <label>
+          <span>群号</span>
+          <input
+            disabled={form.private}
+            value={form.group_id}
+            onChange={(event) => onChange({ ...form, group_id: event.target.value })}
+          />
+        </label>
+        <label className="checkbox-label memory-private-toggle">
+          <input
+            checked={form.private}
+            type="checkbox"
+            onChange={(event) => onChange({ ...form, private: event.target.checked })}
+          />
+          <span>私聊记忆</span>
+        </label>
+        <label>
+          <span>类型</span>
+          <select value={form.memory_type} onChange={(event) => onChange({ ...form, memory_type: event.target.value })}>
+            {memoryTypeOptions
+              .filter((item) => item.value)
+              .map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          <span>置信度</span>
+          <input
+            max="1"
+            min="0"
+            step="0.05"
+            type="number"
+            value={form.confidence}
+            onChange={(event) => onChange({ ...form, confidence: Number(event.target.value) })}
+          />
+        </label>
+        <label>
+          <span>状态</span>
+          <select value={form.status} onChange={(event) => onChange({ ...form, status: event.target.value as "active" | "archived" })}>
+            <option value="active">使用中</option>
+            <option value="archived">已归档</option>
+          </select>
+        </label>
+        <label className="full">
+          <span>记忆内容</span>
+          <textarea value={form.memory_text} onChange={(event) => onChange({ ...form, memory_text: event.target.value })} />
+        </label>
+        <label className="full">
+          <span>来源文本</span>
+          <textarea value={form.source_text} onChange={(event) => onChange({ ...form, source_text: event.target.value })} />
+        </label>
+        <label className="full">
+          <span>说明</span>
+          <input value={form.merge_reason} onChange={(event) => onChange({ ...form, merge_reason: event.target.value })} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function SearchPage({
   form,
+  preview,
   results,
   disabled,
   onChange,
   onSubmit
 }: {
   form: SearchForm;
+  preview: ReplyContextPreview | null;
   results: SearchResult[];
   disabled: boolean;
   onChange: (value: SearchForm) => void;
   onSubmit: () => void;
 }) {
+  const systemMessage = preview?.messages.find((item) => item.role === "system");
+  const userMessage = preview?.messages.find((item) => item.role === "user");
+
   return (
     <section className="panel">
       <div className="panel-header">
@@ -841,8 +1160,41 @@ function SearchPage({
           ))}
           {!results.length && <EmptyState message="暂无检索结果" />}
         </div>
+        <div className="context-preview">
+          <div className="context-head">
+            <div>
+              <h3>回复上下文预览</h3>
+              <span>只读预览，不调用模型，不写入数据库。</span>
+            </div>
+            {preview && (
+              <div className="context-meta">
+                <span>记忆注入：{preview.memory_injection_enabled ? "开启" : "关闭"}</span>
+                <span>命中：{preview.memory_count} 条</span>
+                <span>编号：{preview.used_memory_ids.length ? preview.used_memory_ids.join("、") : "-"}</span>
+              </div>
+            )}
+          </div>
+          {preview ? (
+            <div className="prompt-grid">
+              <PromptBlock title="System Prompt" content={systemMessage?.content || ""} />
+              <PromptBlock title="User Prompt" content={userMessage?.content || ""} />
+              <PromptBlock title="Metadata" content={JSON.stringify(preview.metadata, null, 2)} />
+            </div>
+          ) : (
+            <EmptyState message="开始检索后会显示真实回复前的上下文预览" />
+          )}
+        </div>
       </div>
     </section>
+  );
+}
+
+function PromptBlock({ title, content }: { title: string; content: string }) {
+  return (
+    <article className="prompt-block">
+      <div className="prompt-title">{title}</div>
+      <pre>{content || "-"}</pre>
+    </article>
   );
 }
 

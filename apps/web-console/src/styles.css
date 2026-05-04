@@ -572,6 +572,25 @@ h2 {
   margin-left: auto;
 }
 
+.pagination-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.pagination-controls .icon-button {
+  width: 30px;
+  min-height: 30px;
+}
+
 .filter-grid {
   display: grid;
   grid-template-columns: 1fr 1.1fr 1.1fr 1fr 1.2fr auto;
@@ -585,6 +604,52 @@ h2 {
   display: flex;
   align-items: end;
   gap: 8px;
+}
+
+.memory-form {
+  display: grid;
+  gap: 12px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 14px 16px 16px;
+  background: var(--panel-soft);
+}
+
+.memory-form-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.memory-form-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.memory-form-head span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.memory-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.memory-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 0.75fr 1fr 0.75fr 0.85fr;
+  gap: 10px;
+}
+
+.memory-form-grid textarea {
+  min-height: 92px;
+}
+
+.memory-private-toggle {
+  padding-top: 22px;
 }
 
 .table-wrap {
@@ -766,6 +831,85 @@ th input[type="checkbox"] {
   margin-top: 8px;
 }
 
+.context-preview {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line-soft);
+  padding: 16px;
+}
+
+.context-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.context-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.context-head span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.context-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 580px;
+}
+
+.context-meta span {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 8px;
+  background: var(--panel-soft);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.prompt-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.prompt-block {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.prompt-title {
+  min-height: 34px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 9px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.prompt-block pre {
+  max-height: 280px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  color: var(--ink);
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -869,6 +1013,10 @@ th input[type="checkbox"] {
   .filter-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .memory-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -889,6 +1037,7 @@ th input[type="checkbox"] {
   .split-grid,
   .filter-grid,
   .form-grid,
+  .memory-form-grid,
   .settings-grid {
     grid-template-columns: 1fr;
   }
@@ -903,6 +1052,10 @@ th input[type="checkbox"] {
 
   .status-strip,
   .control-bar,
+  .context-head,
+  .context-meta,
+  .memory-form-head,
+  .memory-form-actions,
   .toolbar-actions,
   .token-field,
   .compact-field {
@@ -912,6 +1065,10 @@ th input[type="checkbox"] {
 
   .control-bar,
   .status-strip,
+  .context-head,
+  .context-meta,
+  .memory-form-head,
+  .memory-form-actions,
   .filter-actions {
     flex-direction: column;
   }
@@ -925,7 +1082,13 @@ th input[type="checkbox"] {
     margin-left: 0;
   }
 
+  .pagination-controls {
+    justify-content: space-between;
+    width: 100%;
+  }
+
   .toolbar-actions button,
+  .memory-form-actions button,
   .filter-actions button,
   .preview-actions button,
   .quick-actions button {

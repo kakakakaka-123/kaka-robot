@@ -4,7 +4,7 @@
 
 ## 0. 最新交接摘要
 
-当前日期：2026-05-04。  
+当前日期：2026-05-05。
 当前项目目录：
 
 ```text
@@ -37,7 +37,8 @@ D:\Python\AgentRobot\kaka-v2
 -> 配置模板和本地自检
 -> 第一版长期记忆设计
 -> 本地 Web 管理台 /admin
--> 输入分析状态和候选区状态的网页端管理
+-> 正式记忆分页、归档、恢复、硬删除、新增和编辑
+-> 回复检索和回复上下文预览
 ```
 
 当前真实状态：
@@ -70,11 +71,13 @@ D:\Python\AgentRobot\kaka-v2
 - 已有根目录 `.env.example` 配置模板。
 - 已有 `scripts/doctor.py` 本地自检脚本，用于检查配置形状、数据库、导入和端口状态。
 - 已有 `docs/长期记忆设计.md`，明确第一版记什么、不记什么、`memories` 表建议和抽取规则。
-- 已有本地 Web 管理台：前端在 `apps/web-console`，`kaka-core` 托管 `/admin`，管理 API 在 `/admin/api/*`；当前 Web 界面只暴露总览、正式记忆归档/恢复/删除、回复检索预览、运行状态和预留扩展入口。最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，不再作为日常 Web 页面暴露。
+- 已有本地 Web 管理台：前端在 `apps/web-console`，`kaka-core` 托管 `/admin`，管理 API 在 `/admin/api/*`；当前 Web 界面只暴露总览、正式记忆、回复检索、运行状态和预留扩展入口。最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，不再作为日常 Web 页面暴露。
 - Web 管理台已成为正式记忆的日常查看和管理入口；脚本现在主要留给开发、测试、批量修复、候选/输入后台处理和应急排查。
 - 近期已补上跨进程事件处理锁和 SQLite 时间戳修正，重复聊天事件在绕过进程内锁时也不会重复调用 LLM；管理总览继续脱敏 `database_url`。
 - 输入分析和候选区的写库能力仍保留在管理 API、脚本和数据库层；Web 日常页面暂不暴露这些后台处理入口。
-- 正式记忆页支持 `active / archived` 切换和确认后的硬删除；危险写库动作都有确认弹窗。
+- 正式记忆页按 `memories.id` 稳定升序显示，支持每页 50 条分页、`active / archived / all` 切换、新增、编辑、归档、恢复和确认后的硬删除；危险写库动作都有确认弹窗。
+- 手动新增正式记忆会写入 `source="manual"`，默认 `merge_reason="手动新增"`；编辑会同步更新 `memory_text / normalized_text / memory_type / confidence / source_text / status / merge_reason`，也可调整用户和群/私聊场景。
+- 回复检索页会同时请求正式记忆检索和回复上下文预览，展示 System Prompt、User Prompt、metadata、`used_memory_ids` 和命中数量，方便确认真实回复前会给模型什么上下文。
 - 脚本现在定位为开发、测试、排查和应急备用入口；用户日常管理优先使用网页。
 - 已经创建根目录 `.env`，其中有 DeepSeek API Key。`.env` 被 `.gitignore` 忽略，不要把 Key 写进任何文档或回复。
 
@@ -87,7 +90,10 @@ qq-adapter：18 passed（历史完整测试记录）
 doctor：56 OK, 3 WARN, 0 FAIL
 web-console：npm run build passed
 本轮核心相关针对性测试：31 passed
-admin API 单测：4 passed
+2026-05-05 正式记忆 CRUD/分页相关针对性测试：25 passed
+2026-05-05 web-console：npm run build passed
+2026-05-05 git diff --check：passed
+用户 2026-05-05 实测：当前真实链路暂无大问题
 真实数据库状态写入验证：通过
 浏览器管理台回放：通过
 ```
@@ -120,7 +126,7 @@ memory_candidates.id=42 -> approved -> rejected -> approved
 下一个对话框最应该继续做：
 
 ```text
-先阅读本交接文档和 docs/下次上下文.md；如果继续验收，优先打开 http://127.0.0.1:8001/admin 手动检查输入分析、候选区和正式记忆管理；之后再按需要启动 QQ 链路，观察自动候选分析、自动候选区复核和回复时长期记忆使用是否稳定
+先阅读本交接文档和 docs/下次上下文.md；如果继续验收，优先打开 http://127.0.0.1:8001/admin 手动检查正式记忆分页、新增、编辑、归档、恢复、硬删除和回复检索预览；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再按需要启动 QQ 链路，观察自动候选分析、自动候选区复核和回复时长期记忆使用是否稳定
 ```
 
 第一目标仍然只做文本：
@@ -136,8 +142,8 @@ QQ 发一句话
 -> 最近对话脚本可以查到观察记录和回复记录
 -> 满足条件时自动整理 memory_candidates 候选区
 -> 自动候选复核满足条件时把 pending 候选写入 memories，或继续手动用 LLM 复核脚本确认
--> 用户偶尔查看 memories，不合适的记忆用 manage_memories.py 归档或硬删除
--> 用户日常也可以直接用 /admin 管理 inputs、memory_candidates 和 memories
+-> 用户偶尔查看 memories，不合适的记忆优先在 /admin 归档，确认错误、垃圾或敏感再硬删除
+-> 用户日常用 /admin 管理正式 memories；inputs 和 memory_candidates 保留给管理 API、脚本和数据库处理
 ```
 
 暂时不要做图片、表情包、语音和复杂主动行为。下一步先保持真实 QQ 对话运行，观察自动记忆链路和回复中的记忆使用效果。
@@ -821,6 +827,11 @@ AIoT 交互例子：
 57. 修复 SQLite 事件处理锁的时间戳比较问题，跨进程重复聊天事件现在也能稳定复用已保存 output，不会因为 `leased_until` 时区比较失败而重复调用 LLM。
 58. 精简 Web 管理台日常页面：保留总览、正式记忆、回复检索、运行状态和预留扩展入口；最近对话、输入分析、候选区能力保留在 API、脚本和数据库中。
 59. 统一项目展示名为“卡咔”，入口文档改为 `KAKA_HANDOFF.md` 和 `卡咔电子生命系统设计文档.md`；技术目录、包名、环境变量和实际仓库路径继续保留英文/现有路径。
+60. 修复正式记忆页编号显示顺序：后端列表改为按 `MemoryRecord.id.asc()` 稳定排序，避免因为更新时间变化导致编号看起来乱跳。
+61. 正式记忆列表新增分页：`/admin/api/memories` 支持 `limit / offset / total`，前端默认每页 50 条，并提供上一页/下一页和总数显示。
+62. 回复检索页新增回复上下文预览：`POST /admin/api/reply-context/preview` 复用真实回复上下文组装器，前端展示 System Prompt、User Prompt、metadata 和命中记忆 ID，便于调试回复时实际注入的长期记忆。
+63. 正式记忆管理补齐“增”和“改”：新增 `POST /admin/api/memories` 和 `PATCH /admin/api/memories/{memory_id}`，Web 正式记忆页支持手动新增和单条编辑；归档、恢复和硬删除逻辑保留。
+64. 创建 `开发日志/2026-05-05.md`，同步正式记忆分页、回复上下文预览、正式记忆新增/编辑、测试结果和当前下一步建议。
 
 2026-05-04 本轮检查验证结果：
 
@@ -838,14 +849,23 @@ doctor：56 OK, 3 WARN, 0 FAIL
 浏览器管理台回放：通过
 ```
 
+2026-05-05 本轮检查验证结果：
+
+```text
+后端针对性测试：tests/test_admin_api.py tests/test_manage_memories.py tests/test_search_memories.py -> 25 passed
+web-console：npm run build passed
+git diff --check：passed
+用户实测：正式记忆新增/编辑和当前真实链路暂无大问题
+```
+
 下一步建议按顺序做：
 
-1. 启动 `kaka-core`，打开 `http://127.0.0.1:8001/admin` 做一次手动验收。
+1. 启动 `kaka-core`，打开 `http://127.0.0.1:8001/admin` 做一次轻量手动验收。
 2. 检查左侧导航的总览、正式记忆、回复检索、运行状态和预留扩展是否正常。
-3. 在正式记忆页复查归档、恢复和确认后硬删除。
+3. 在正式记忆页复查分页、新增、编辑、归档、恢复和确认后硬删除。
 4. 再启动 `qq-adapter` 保持真实 QQ 对话运行，观察自动候选分析和自动候选区复核是否稳定。
 5. 用响应 metadata 或数据库输出记录回查 `used_memory_ids`。
-6. 偶尔查看 `memories`，不合适的记忆优先 `archived`，确认错误、垃圾或敏感再硬删除。
+6. 偶尔查看 `memories`，不合适的记忆优先在 `/admin` 归档，确认错误、垃圾或敏感再硬删除；确需手动补记或修正时直接用正式记忆页的新增/编辑。
 7. 如果回复过度提起旧事，再调低 `MEMORY_REPLY_LIMIT` 或提高 `MEMORY_REPLY_MIN_SCORE`。
 
 下一步成功标准：
@@ -864,7 +884,7 @@ QQ 发一句话
 -> show_memories.py 能查看正式记忆
 -> search_memories.py 能预览回复前可能命中的记忆
 -> manage_memories.py 能把不合适的正式记忆归档或删除
--> /admin 能完成总览查看、正式记忆管理、回复检索预览和运行状态检查
+-> /admin 能完成总览查看、正式记忆分页/新增/编辑/归档/恢复/硬删除、回复检索预览和运行状态检查
 -> 重复 QQ 事件不会重复调用 LLM 或重置分析状态
 -> 一条 input 可以产生多条不同 memory_candidates
 -> doctor.py 没有 FAIL

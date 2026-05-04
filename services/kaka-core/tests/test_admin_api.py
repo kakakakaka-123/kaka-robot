@@ -86,6 +86,60 @@ def test_admin_merge_candidate_and_archive_memory(monkeypatch, tmp_path):
     assert archived.json()["updated"] == 1
 
 
+def test_admin_can_create_and_update_memory(monkeypatch, tmp_path):
+    client = create_test_client(monkeypatch, tmp_path)
+
+    created = client.post(
+        "/admin/api/memories",
+        json={
+            "user_id": "10002",
+            "display_name": "新用户",
+            "group_id": "20003",
+            "memory_text": "新用户喜欢先看结论。",
+            "memory_type": "stable_preference",
+            "confidence": 0.7,
+            "source_text": "请先说结论",
+        },
+    )
+    created_item = created.json()["item"]
+    updated = client.patch(
+        f"/admin/api/memories/{created_item['id']}",
+        json={
+            "memory_text": "新用户喜欢回复先给结论。",
+            "memory_type": "stable_preference",
+            "confidence": 0.9,
+            "merge_reason": "手动修正",
+        },
+    )
+
+    assert created.status_code == 200
+    assert created_item["source"] == "manual"
+    assert created_item["user"]["platform_user_id"] == "10002"
+    assert created_item["scene"]["scene_id"] == "20003"
+    assert updated.status_code == 200
+    assert updated.json()["item"]["memory_text"] == "新用户喜欢回复先给结论。"
+    assert updated.json()["item"]["normalized_text"] == "新用户喜欢回复先给结论"
+    assert updated.json()["item"]["confidence"] == 0.9
+    assert updated.json()["item"]["merge_reason"] == "手动修正"
+
+
+def test_admin_create_memory_validates_required_text(monkeypatch, tmp_path):
+    client = create_test_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/admin/api/memories",
+        json={
+            "user_id": "10002",
+            "memory_text": "   ",
+            "memory_type": "user_fact",
+            "confidence": 0.8,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "memory_text is required"
+
+
 def test_admin_updates_input_and_candidate_status(monkeypatch, tmp_path):
     client = create_test_client(monkeypatch, tmp_path)
     with create_session_factory()() as session:
@@ -127,6 +181,86 @@ def test_admin_search_memories(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.json()["items"][0]["memory"]["memory_text"] == "用户喜欢直接的回答。"
+
+
+def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path):
+    client = create_test_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/admin/api/reply-context/preview",
+        json={
+            "user_id": "10001",
+            "display_name": "测试用户",
+            "text": "我想要直接一点的回答",
+            "group_id": "20002",
+        },
+    )
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["memory_injection_enabled"] is True
+    assert data["memory_count"] == 1
+    assert data["used_memory_ids"] == [1]
+    assert data["messages"][0]["role"] == "system"
+    assert "可参考的长期记忆" in data["messages"][0]["content"]
+    assert "用户喜欢直接的回答。" in data["messages"][0]["content"]
+    assert data["messages"][1]["role"] == "user"
+    assert "用户消息：我想要直接一点的回答" in data["messages"][1]["content"]
+
+
+def test_admin_memories_are_ordered_by_id(monkeypatch, tmp_path):
+    client = create_test_client(monkeypatch, tmp_path)
+    session_factory = create_session_factory()
+    with session_factory() as session:
+        user = session.scalar(select(UserRecord))
+        scene = session.scalar(select(SceneRecord))
+        assert user is not None
+        assert scene is not None
+        session.add(
+            MemoryRecord(
+                user_id=user.id,
+                scene_id=scene.id,
+                memory_text="用户后加入的测试记忆。",
+                normalized_text="用户后加入的测试记忆",
+                memory_type="user_fact",
+                confidence=0.8,
+                source_text="测试",
+                source="candidate",
+                status="active",
+                merge_reason="测试",
+                created_at=datetime(2026, 5, 3, 1, 4, tzinfo=timezone.utc),
+                updated_at=datetime(2026, 5, 3, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+        session.commit()
+
+    response = client.get("/admin/api/memories", params={"status": "active"})
+    ids = [item["id"] for item in response.json()["items"]]
+
+    assert response.status_code == 200
+    assert ids == sorted(ids)
+
+
+def test_admin_memories_support_pagination(monkeypatch, tmp_path):
+    client = create_test_client(monkeypatch, tmp_path)
+    seed_extra_memories(4)
+
+    first_page = client.get("/admin/api/memories", params={"status": "active", "limit": 2, "offset": 0})
+    second_page = client.get("/admin/api/memories", params={"status": "active", "limit": 2, "offset": 2})
+
+    first_data = first_page.json()
+    second_data = second_page.json()
+
+    assert first_page.status_code == 200
+    assert second_page.status_code == 200
+    assert first_data["total"] == 5
+    assert first_data["limit"] == 2
+    assert first_data["offset"] == 0
+    assert len(first_data["items"]) == 2
+    assert second_data["total"] == 5
+    assert second_data["limit"] == 2
+    assert second_data["offset"] == 2
+    assert [item["id"] for item in second_data["items"]] == [3, 4]
 
 
 def test_admin_api_requires_token_when_local_only_disabled(monkeypatch, tmp_path):
@@ -225,4 +359,31 @@ def seed_admin_data() -> None:
                 updated_at=datetime(2026, 5, 3, 1, 3, tzinfo=timezone.utc),
             )
         )
+        session.commit()
+
+
+def seed_extra_memories(count: int) -> None:
+    session_factory = create_session_factory()
+    with session_factory() as session:
+        user = session.scalar(select(UserRecord))
+        scene = session.scalar(select(SceneRecord))
+        assert user is not None
+        assert scene is not None
+        for index in range(count):
+            session.add(
+                MemoryRecord(
+                    user_id=user.id,
+                    scene_id=scene.id,
+                    memory_text=f"用户分页测试记忆 {index}。",
+                    normalized_text=f"用户分页测试记忆 {index}",
+                    memory_type="user_fact",
+                    confidence=0.8,
+                    source_text="测试",
+                    source="candidate",
+                    status="active",
+                    merge_reason="测试",
+                    created_at=datetime(2026, 5, 3, 1, 4 + index, tzinfo=timezone.utc),
+                    updated_at=datetime(2026, 5, 3, 1, 4 + index, tzinfo=timezone.utc),
+                )
+            )
         session.commit()

@@ -13,6 +13,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from kaka_core.config.settings import get_settings
+from kaka_core.context.builder import build_reply_context
 from kaka_core.memory import merge as memory_merge
 from kaka_core.memory.search import MemorySearchFilters, format_scene_type, search_user_memories
 from kaka_core.storage.models import (
@@ -24,16 +25,19 @@ from kaka_core.storage.models import (
     UserRecord,
     utc_now,
 )
+from kaka_protocol import MessageContent, MessageEvent, Platform, SceneType
 
 LOCAL_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
 VALID_MEMORY_STATUSES = {"active", "archived"}
 VALID_INPUT_STATUSES = {"not_analyzed", "analyzed", "skipped"}
 VALID_CANDIDATE_STATUSES = {"pending", "approved", "rejected", "merged_duplicate"}
+MEMORY_SOURCE_MANUAL = "manual"
 
 
 @dataclass(frozen=True)
 class ListFilters:
     limit: int = 50
+    offset: int = 0
     ids: tuple[int, ...] = ()
     status: str | None = None
     memory_type: str | None = None
@@ -305,9 +309,15 @@ def list_memories(session: Session, filters: ListFilters) -> dict[str, Any]:
             MemoryRecord.created_at >= start_utc,
             MemoryRecord.created_at < end_utc,
         )
-    statement = statement.order_by(MemoryRecord.updated_at.desc(), MemoryRecord.created_at.desc()).limit(filters.limit)
+    total = int(session.scalar(select(func.count()).select_from(statement.subquery())) or 0)
+    statement = statement.order_by(MemoryRecord.id.asc()).offset(filters.offset).limit(filters.limit)
     rows = session.execute(statement).all()
-    return {"items": [serialize_memory(*row) for row in rows], "limit": filters.limit}
+    return {
+        "items": [serialize_memory(*row) for row in rows],
+        "limit": filters.limit,
+        "offset": filters.offset,
+        "total": total,
+    }
 
 
 def set_memory_status(session: Session, memory_ids: tuple[int, ...], status: str) -> dict[str, Any]:
@@ -322,6 +332,107 @@ def set_memory_status(session: Session, memory_ids: tuple[int, ...], status: str
         memory.updated_at = utc_now()
         updated += 1
     return {"updated": updated, "matched": len(memories), "status": status}
+
+
+def create_manual_memory(
+    session: Session,
+    *,
+    user_id: str,
+    display_name: str | None = None,
+    group_id: str | None = None,
+    private: bool = False,
+    memory_text: str,
+    memory_type: str,
+    confidence: float = 0.8,
+    source_text: str | None = None,
+    status: str = "active",
+    merge_reason: str | None = None,
+) -> dict[str, Any]:
+    normalized_memory_text = normalize_required_memory_text(memory_text)
+    normalized_memory_type = normalize_required_text(memory_type, "memory_type")
+    normalized_status = normalize_memory_status(status)
+    normalized_confidence = normalize_confidence(confidence)
+    user = get_or_create_admin_user(session, user_id, display_name)
+    scene = get_or_create_admin_scene(session, user_id=user_id, group_id=group_id, private=private)
+    memory = MemoryRecord(
+        source_candidate_id=None,
+        user_id=user.id,
+        scene_id=scene.id if scene is not None else None,
+        memory_text=memory_text.strip(),
+        normalized_text=normalized_memory_text,
+        memory_type=normalized_memory_type,
+        confidence=normalized_confidence,
+        source_text=normalize_text(source_text) or memory_text.strip(),
+        source=MEMORY_SOURCE_MANUAL,
+        status=normalized_status,
+        merge_reason=normalize_text(merge_reason) or "手动新增",
+    )
+    session.add(memory)
+    session.flush()
+    return serialize_memory(memory, user, scene, None)
+
+
+def update_memory(
+    session: Session,
+    memory_id: int,
+    *,
+    user_id: str | None = None,
+    display_name: str | None = None,
+    group_id: str | None = None,
+    private: bool = False,
+    scene_update: bool = False,
+    memory_text: str | None = None,
+    memory_type: str | None = None,
+    confidence: float | None = None,
+    source_text: str | None = None,
+    status: str | None = None,
+    merge_reason: str | None = None,
+) -> dict[str, Any]:
+    memory = session.get(MemoryRecord, memory_id)
+    if memory is None:
+        raise LookupError(f"memory not found: {memory_id}")
+
+    if memory_text is not None:
+        memory.memory_text = normalize_required_text(memory_text, "memory_text")
+        memory.normalized_text = normalize_required_memory_text(memory_text)
+    if memory_type is not None:
+        memory.memory_type = normalize_required_text(memory_type, "memory_type")
+    if confidence is not None:
+        memory.confidence = normalize_confidence(confidence)
+    if source_text is not None:
+        memory.source_text = normalize_text(source_text)
+    if status is not None:
+        memory.status = normalize_memory_status(status)
+    if merge_reason is not None:
+        memory.merge_reason = normalize_text(merge_reason)
+
+    if user_id is not None:
+        user = get_or_create_admin_user(session, user_id, display_name)
+        memory.user_id = user.id
+    else:
+        user = session.get(UserRecord, memory.user_id)
+        if user is not None and display_name:
+            user.display_name = display_name.strip()
+
+    if scene_update:
+        target_user_id = user.platform_user_id if user is not None else user_id or ""
+        scene = get_or_create_admin_scene(
+            session,
+            user_id=target_user_id,
+            group_id=group_id,
+            private=private,
+        )
+        memory.scene_id = scene.id if scene is not None else None
+    else:
+        scene = session.get(SceneRecord, memory.scene_id) if memory.scene_id is not None else None
+
+    memory.updated_at = utc_now()
+    session.flush()
+    user = user or session.get(UserRecord, memory.user_id)
+    scene = session.get(SceneRecord, memory.scene_id) if memory.scene_id is not None else None
+    if user is None:
+        raise LookupError(f"memory user not found: {memory.user_id}")
+    return serialize_memory(memory, user, scene, memory.source_candidate)
 
 
 def delete_memories(session: Session, memory_ids: tuple[int, ...]) -> dict[str, Any]:
@@ -385,6 +496,69 @@ def search_memories(
             "memory_type": memory_type,
         },
     }
+
+
+def preview_reply_context(
+    *,
+    user_id: str,
+    text: str,
+    group_id: str | None = None,
+    private: bool = False,
+    display_name: str | None = None,
+) -> dict[str, Any]:
+    settings = get_settings()
+    event = build_preview_message_event(
+        user_id=user_id,
+        text=text,
+        group_id=group_id,
+        private=private,
+        display_name=display_name,
+    )
+    reply_context = build_reply_context(event, settings.memory_reply)
+    messages = [
+        {
+            "role": message.role,
+            "content": message.content,
+        }
+        for message in reply_context.messages
+    ]
+    return {
+        "messages": messages,
+        "metadata": reply_context.metadata,
+        "used_memory_ids": reply_context.metadata.get("used_memory_ids", []),
+        "memory_count": reply_context.metadata.get("memory_count", 0),
+        "memory_injection_enabled": reply_context.metadata.get("memory_injection_enabled", False),
+        "event": {
+            "platform": event.platform,
+            "scene_type": event.scene_type,
+            "scene_id": event.scene_id,
+            "user_id": event.user_id,
+            "display_name": event.display_name,
+            "text": event.content.text or "",
+        },
+    }
+
+
+def build_preview_message_event(
+    *,
+    user_id: str,
+    text: str,
+    group_id: str | None,
+    private: bool,
+    display_name: str | None,
+) -> MessageEvent:
+    scene_type = SceneType.PRIVATE if private or not group_id else SceneType.GROUP
+    scene_id = user_id if scene_type == SceneType.PRIVATE else str(group_id)
+    return MessageEvent(
+        event_id=f"admin-preview:{user_id}:{scene_type}:{scene_id}",
+        platform=Platform.QQ,
+        scene_type=scene_type,
+        scene_id=scene_id,
+        user_id=user_id,
+        display_name=display_name or user_id,
+        content=MessageContent.text_message(text),
+        metadata={"source": "admin_reply_context_preview"},
+    )
 
 
 def apply_common_input_filters(statement: Any, filters: ListFilters) -> Any:
@@ -562,6 +736,99 @@ def normalize_text(value: str | None) -> str | None:
     return text or None
 
 
+def normalize_required_text(value: str | None, field_name: str) -> str:
+    text = normalize_text(value)
+    if text is None:
+        raise ValueError(f"{field_name} is required")
+    return text
+
+
+def normalize_required_memory_text(value: str | None) -> str:
+    normalized_text = memory_merge.normalize_memory_text(value)
+    if not normalized_text:
+        raise ValueError("memory_text is required")
+    return normalized_text
+
+
+def normalize_confidence(value: float) -> float:
+    number = float(value)
+    if number < 0 or number > 1:
+        raise ValueError("confidence must be between 0 and 1")
+    return number
+
+
+def normalize_memory_status(value: str) -> str:
+    status = normalize_required_text(value, "status")
+    if status not in VALID_MEMORY_STATUSES:
+        raise ValueError(f"unsupported memory status: {status}")
+    return status
+
+
+def get_or_create_admin_user(
+    session: Session,
+    platform_user_id: str,
+    display_name: str | None = None,
+) -> UserRecord:
+    normalized_user_id = normalize_required_text(platform_user_id, "user_id")
+    user = session.scalar(
+        select(UserRecord).where(
+            UserRecord.platform == "qq",
+            UserRecord.platform_user_id == normalized_user_id,
+        )
+    )
+    normalized_display_name = normalize_text(display_name)
+    if user is not None:
+        if normalized_display_name:
+            user.display_name = normalized_display_name
+        return user
+
+    user = UserRecord(
+        platform="qq",
+        platform_user_id=normalized_user_id,
+        display_name=normalized_display_name or normalized_user_id,
+    )
+    session.add(user)
+    session.flush()
+    return user
+
+
+def get_or_create_admin_scene(
+    session: Session,
+    *,
+    user_id: str,
+    group_id: str | None = None,
+    private: bool = False,
+) -> SceneRecord | None:
+    normalized_group_id = normalize_text(group_id)
+    if private:
+        scene_type = "private"
+        scene_id = normalize_required_text(user_id, "user_id")
+    elif normalized_group_id:
+        scene_type = "group"
+        scene_id = normalized_group_id
+    else:
+        return None
+
+    scene = session.scalar(
+        select(SceneRecord).where(
+            SceneRecord.platform == "qq",
+            SceneRecord.scene_type == scene_type,
+            SceneRecord.scene_id == scene_id,
+        )
+    )
+    if scene is not None:
+        return scene
+
+    scene = SceneRecord(
+        platform="qq",
+        scene_type=scene_type,
+        scene_id=scene_id,
+    )
+    session.add(scene)
+    session.flush()
+    return scene
+
+
 def parse_date(value: str | None) -> date | None:
     text = normalize_text(value)
     if text is None:
@@ -573,6 +840,10 @@ def clamp_limit(value: int, *, default: int = 50, maximum: int = 200) -> int:
     if value <= 0:
         return default
     return min(value, maximum)
+
+
+def clamp_offset(value: int) -> int:
+    return max(0, value)
 
 
 def local_date_to_utc_range(value: date) -> tuple[datetime, datetime]:

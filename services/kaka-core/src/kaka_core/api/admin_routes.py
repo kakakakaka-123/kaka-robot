@@ -63,6 +63,33 @@ class SetMemoryStatusRequest(IdListRequest):
     status: str
 
 
+class CreateMemoryRequest(BaseModel):
+    user_id: str
+    display_name: str | None = None
+    group_id: str | None = None
+    private: bool = False
+    memory_text: str
+    memory_type: str
+    confidence: float = 0.8
+    source_text: str | None = None
+    status: str = "active"
+    merge_reason: str | None = None
+
+
+class UpdateMemoryRequest(BaseModel):
+    user_id: str | None = None
+    display_name: str | None = None
+    group_id: str | None = None
+    private: bool = False
+    scene_update: bool = False
+    memory_text: str | None = None
+    memory_type: str | None = None
+    confidence: float | None = None
+    source_text: str | None = None
+    status: str | None = None
+    merge_reason: str | None = None
+
+
 class DeleteMemoriesRequest(IdListRequest):
     confirm: bool = False
 
@@ -78,6 +105,14 @@ class SearchMemoriesRequest(BaseModel):
     memory_type: str | None = None
 
 
+class ReplyContextPreviewRequest(BaseModel):
+    user_id: str
+    text: str
+    group_id: str | None = None
+    private: bool = False
+    display_name: str | None = None
+
+
 def get_admin_session() -> Iterator[Session]:
     init_database()
     session_factory = create_session_factory()
@@ -89,6 +124,7 @@ def build_filters(
     *,
     ids: str | None = None,
     limit: int = 50,
+    offset: int = 0,
     status: str | None = None,
     memory_type: str | None = None,
     group_id: str | None = None,
@@ -106,6 +142,7 @@ def build_filters(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return service.ListFilters(
         limit=service.clamp_limit(limit),
+        offset=service.clamp_offset(offset),
         ids=parsed_ids,
         status=service.normalize_text(status),
         memory_type=service.normalize_text(memory_type),
@@ -271,6 +308,7 @@ def memories(
     session: SessionDep,
     ids: IdsQuery = None,
     limit: int = 50,
+    offset: int = 0,
     status: str | None = "active",
     memory_type: str | None = None,
     group_id: str | None = None,
@@ -281,6 +319,7 @@ def memories(
     filters = build_filters(
         ids=ids,
         limit=limit,
+        offset=offset,
         status=status,
         memory_type=memory_type,
         group_id=group_id,
@@ -299,6 +338,54 @@ def update_memory_status(request: SetMemoryStatusRequest, session: SessionDep) -
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
     return result
+
+
+@admin_api_router.post("/memories")
+def create_memory(request: CreateMemoryRequest, session: SessionDep) -> dict:
+    try:
+        item = service.create_manual_memory(
+            session,
+            user_id=request.user_id,
+            display_name=request.display_name,
+            group_id=request.group_id,
+            private=request.private,
+            memory_text=request.memory_text,
+            memory_type=request.memory_type,
+            confidence=request.confidence,
+            source_text=request.source_text,
+            status=request.status,
+            merge_reason=request.merge_reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return {"item": item}
+
+
+@admin_api_router.patch("/memories/{memory_id}")
+def update_memory(memory_id: int, request: UpdateMemoryRequest, session: SessionDep) -> dict:
+    try:
+        item = service.update_memory(
+            session,
+            memory_id,
+            user_id=request.user_id,
+            display_name=request.display_name,
+            group_id=request.group_id,
+            private=request.private,
+            scene_update=request.scene_update,
+            memory_text=request.memory_text,
+            memory_type=request.memory_type,
+            confidence=request.confidence,
+            source_text=request.source_text,
+            status=request.status,
+            merge_reason=request.merge_reason,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return {"item": item}
 
 
 @admin_api_router.post("/memories/delete")
@@ -322,6 +409,17 @@ def memory_search(request: SearchMemoriesRequest, session: SessionDep) -> dict:
         pool_size=service.clamp_limit(request.pool_size, default=300, maximum=1000),
         min_score=request.min_score,
         memory_type=service.normalize_text(request.memory_type),
+    )
+
+
+@admin_api_router.post("/reply-context/preview")
+def reply_context_preview(request: ReplyContextPreviewRequest) -> dict:
+    return service.preview_reply_context(
+        user_id=request.user_id,
+        text=request.text,
+        group_id=request.group_id,
+        private=request.private,
+        display_name=service.normalize_text(request.display_name),
     )
 
 
