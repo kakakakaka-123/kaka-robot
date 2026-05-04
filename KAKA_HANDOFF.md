@@ -39,6 +39,7 @@ D:\Python\AgentRobot\kaka-v2
 -> 本地 Web 管理台 /admin
 -> 正式记忆分页、归档、恢复、硬删除、新增和编辑
 -> 回复检索和回复上下文预览
+-> 回复前短期上下文注入
 ```
 
 当前真实状态：
@@ -78,6 +79,7 @@ D:\Python\AgentRobot\kaka-v2
 - 正式记忆页按 `memories.id` 稳定升序显示，支持每页 50 条分页、`active / archived / all` 切换、新增、编辑、归档、恢复和确认后的硬删除；危险写库动作都有确认弹窗。
 - 手动新增正式记忆会写入 `source="manual"`，默认 `merge_reason="手动新增"`；编辑会同步更新 `memory_text / normalized_text / memory_type / confidence / source_text / status / merge_reason`，也可调整用户和群/私聊场景。
 - 回复检索页会同时请求正式记忆检索和回复上下文预览，展示 System Prompt、User Prompt、metadata、`used_memory_ids` 和命中数量，方便确认真实回复前会给模型什么上下文。
+- 已接入第一版短期上下文：回复前从同场景最近输入和输出中读取上下文，默认只看最近 30 分钟，最多 8 条输入记录、总计 1200 字，排除当前消息；metadata 会记录 `short_context_enabled / short_context_count / short_context_input_ids`。
 - 脚本现在定位为开发、测试、排查和应急备用入口；用户日常管理优先使用网页。
 - 已经创建根目录 `.env`，其中有 DeepSeek API Key。`.env` 被 `.gitignore` 忽略，不要把 Key 写进任何文档或回复。
 
@@ -85,12 +87,11 @@ D:\Python\AgentRobot\kaka-v2
 
 ```text
 kaka-protocol：5 passed（历史完整测试记录）
-kaka-core：90 passed
+kaka-core：97 passed
 qq-adapter：18 passed（历史完整测试记录）
 doctor：56 OK, 3 WARN, 0 FAIL
 web-console：npm run build passed
-本轮核心相关针对性测试：31 passed
-2026-05-05 正式记忆 CRUD/分页相关针对性测试：25 passed
+2026-05-05 正式记忆 CRUD/分页和短期上下文相关针对性测试：36 passed
 2026-05-05 web-console：npm run build passed
 2026-05-05 git diff --check：passed
 用户 2026-05-05 实测：当前真实链路暂无大问题
@@ -136,6 +137,7 @@ QQ 发一句话
 -> qq-adapter 收到
 -> 转成 MessageEvent
 -> kaka-core 回复前检索少量 active 长期记忆并组装 prompt，或只观察记录
+-> kaka-core 回复前读取同场景最近 30 分钟内最多 8 条短期上下文
 -> 返回 KakaResponse
 -> qq-adapter 发回 QQ 文本或不回复
 -> SQLite 记录消息，触发回复时记录输出
@@ -805,7 +807,7 @@ AIoT 交互例子：
 35. 新增 `review_memory_candidates.py`，用于测试阶段让 LLM 复核候选区并写入正式记忆，包含拆包重试、关系事实兜底和偏好类型归一化。
 36. 新增 `seed_memory_e2e_data.py`，用于本地造数回放长期记忆链路，默认只读预览，加 `--apply` 才写入测试输入；PyCharm 简单模式写库时需要同时打开 `PYCHARM_APPLY` 和 `PYCHARM_CONFIRM_SEED`。
 37. 新增 `kaka_core.memory.search` 正式记忆检索模块，`search_memories.py` 改为薄封装。
-38. 新增 `kaka_core.context.builder` 回复上下文组装器，当前负责基础人设、长期记忆和当前消息，后续情绪、关系、短期上下文都应接入这里。
+38. 新增 `kaka_core.context.builder` 回复上下文组装器，当前负责基础人设、长期记忆、短期上下文和当前消息，后续情绪、关系都应接入这里。
 39. `generate_chat_response` 已在回复前注入少量高分 `active` 记忆，并在 metadata 中记录 `used_memory_ids`、`memory_count` 和 `memory_injection_enabled`。
 40. 新增 `kaka_core.memory.auto_review`，把候选区 LLM 复核接入 `kaka-core` 整点后台任务。
 41. 新增 `manage_memories.py`，支持正式记忆 `active / archived` 切换和确认后的硬删除。
@@ -832,6 +834,7 @@ AIoT 交互例子：
 62. 回复检索页新增回复上下文预览：`POST /admin/api/reply-context/preview` 复用真实回复上下文组装器，前端展示 System Prompt、User Prompt、metadata 和命中记忆 ID，便于调试回复时实际注入的长期记忆。
 63. 正式记忆管理补齐“增”和“改”：新增 `POST /admin/api/memories` 和 `PATCH /admin/api/memories/{memory_id}`，Web 正式记忆页支持手动新增和单条编辑；归档、恢复和硬删除逻辑保留。
 64. 创建 `开发日志/2026-05-05.md`，同步正式记忆分页、回复上下文预览、正式记忆新增/编辑、测试结果和当前下一步建议。
+65. 新增第一版短期上下文：`SHORT_CONTEXT_ENABLED=true` 默认开启，`SHORT_CONTEXT_LIMIT=8`，`SHORT_CONTEXT_MAX_CHARS=1200`，`SHORT_CONTEXT_WINDOW_MINUTES=30`；回复上下文组装器会把同场景最近输入和卡咔回复压入 User Prompt，metadata 记录命中的 input id。
 
 2026-05-04 本轮检查验证结果：
 
@@ -852,7 +855,9 @@ doctor：56 OK, 3 WARN, 0 FAIL
 2026-05-05 本轮检查验证结果：
 
 ```text
-后端针对性测试：tests/test_admin_api.py tests/test_manage_memories.py tests/test_search_memories.py -> 25 passed
+kaka-core 全量测试：97 passed
+kaka-protocol：5 passed
+后端针对性测试：tests/test_admin_api.py tests/test_chat_service.py tests/test_search_memories.py tests/test_manage_memories.py -> 36 passed
 web-console：npm run build passed
 git diff --check：passed
 用户实测：正式记忆新增/编辑和当前真实链路暂无大问题
@@ -864,9 +869,9 @@ git diff --check：passed
 2. 检查左侧导航的总览、正式记忆、回复检索、运行状态和预留扩展是否正常。
 3. 在正式记忆页复查分页、新增、编辑、归档、恢复和确认后硬删除。
 4. 再启动 `qq-adapter` 保持真实 QQ 对话运行，观察自动候选分析和自动候选区复核是否稳定。
-5. 用响应 metadata 或数据库输出记录回查 `used_memory_ids`。
+5. 用响应 metadata 或数据库输出记录回查 `used_memory_ids`、`short_context_count` 和 `short_context_input_ids`。
 6. 偶尔查看 `memories`，不合适的记忆优先在 `/admin` 归档，确认错误、垃圾或敏感再硬删除；确需手动补记或修正时直接用正式记忆页的新增/编辑。
-7. 如果回复过度提起旧事，再调低 `MEMORY_REPLY_LIMIT` 或提高 `MEMORY_REPLY_MIN_SCORE`。
+7. 真实测试短期上下文是否自然接住最近 30 分钟内的对话；如果回复过度提起旧事，再调低 `MEMORY_REPLY_LIMIT` 或提高 `MEMORY_REPLY_MIN_SCORE`；如果容易被最近闲聊带偏，再调小 `SHORT_CONTEXT_LIMIT` 或关闭 `SHORT_CONTEXT_ENABLED`。
 
 下一步成功标准：
 
@@ -885,12 +890,13 @@ QQ 发一句话
 -> search_memories.py 能预览回复前可能命中的记忆
 -> manage_memories.py 能把不合适的正式记忆归档或删除
 -> /admin 能完成总览查看、正式记忆分页/新增/编辑/归档/恢复/硬删除、回复检索预览和运行状态检查
+-> 回复 metadata 能看到 `short_context_count` 和 `short_context_input_ids`
 -> 重复 QQ 事件不会重复调用 LLM 或重置分析状态
 -> 一条 input 可以产生多条不同 memory_candidates
 -> doctor.py 没有 FAIL
 ```
 
-注意：不要直接跳到关系网、情绪系统、多模态或复杂主动行为。当前长期记忆第一版已经接入回复，下一阶段先保持 `inputs -> memory_candidates -> memories -> 回复前检索` 小而稳、可回查、可管理。
+注意：不要直接跳到关系网、情绪系统、多模态或复杂主动行为。当前长期记忆和短期上下文都已接入回复，下一阶段先保持 `inputs -> memory_candidates -> memories -> 回复前检索 + 短期上下文` 小而稳、可回查、可管理。
 
 ## 13. 明天新对话框的实际启动建议
 

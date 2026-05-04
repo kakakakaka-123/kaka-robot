@@ -108,6 +108,16 @@ class MemoryReplySettings:
 
 
 @dataclass(frozen=True)
+class ShortContextSettings:
+    """回复时短期上下文注入配置。"""
+
+    enabled: bool
+    limit: int
+    max_chars: int
+    window_minutes: int
+
+
+@dataclass(frozen=True)
 class AdminSettings:
     """本地管理台访问保护配置。"""
 
@@ -124,6 +134,7 @@ class Settings:
     memory_analysis: MemoryAnalysisSettings
     memory_review: MemoryReviewSettings
     memory_reply: MemoryReplySettings
+    short_context: ShortContextSettings
     admin: AdminSettings
 
 
@@ -172,6 +183,12 @@ def get_settings() -> Settings:
             limit=_get_int("MEMORY_REPLY_LIMIT", 5),
             min_score=_get_float("MEMORY_REPLY_MIN_SCORE", 1.0),
             pool_size=_get_int("MEMORY_REPLY_POOL_SIZE", 300),
+        ),
+        short_context=ShortContextSettings(
+            enabled=_get_bool("SHORT_CONTEXT_ENABLED", True),
+            limit=_get_int("SHORT_CONTEXT_LIMIT", 8),
+            max_chars=_get_int("SHORT_CONTEXT_MAX_CHARS", 1200),
+            window_minutes=_get_int("SHORT_CONTEXT_WINDOW_MINUTES", 30),
         ),
         admin=AdminSettings(
             local_only=_get_bool("ADMIN_LOCAL_ONLY", True),

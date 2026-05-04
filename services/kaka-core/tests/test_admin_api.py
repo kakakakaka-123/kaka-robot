@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -185,6 +185,11 @@ def test_admin_search_memories(monkeypatch, tmp_path):
 
 def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path):
     client = create_test_client(monkeypatch, tmp_path)
+    with create_session_factory()() as session:
+        input_record = session.scalar(select(InputRecord))
+        assert input_record is not None
+        input_record.created_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        session.commit()
 
     response = client.post(
         "/admin/api/reply-context/preview",
@@ -205,7 +210,12 @@ def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path)
     assert "可参考的长期记忆" in data["messages"][0]["content"]
     assert "用户喜欢直接的回答。" in data["messages"][0]["content"]
     assert data["messages"][1]["role"] == "user"
-    assert "用户消息：我想要直接一点的回答" in data["messages"][1]["content"]
+    assert "近期对话" in data["messages"][1]["content"]
+    assert "测试用户：我正在开发卡咔。" in data["messages"][1]["content"]
+    assert "当前用户消息：我想要直接一点的回答" in data["messages"][1]["content"]
+    assert data["metadata"]["short_context_enabled"] is True
+    assert data["metadata"]["short_context_count"] == 1
+    assert data["metadata"]["short_context_input_ids"] == [1]
 
 
 def test_admin_memories_are_ordered_by_id(monkeypatch, tmp_path):

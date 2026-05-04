@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from kaka_core.config.settings import MemoryReplySettings
+from kaka_core.config.settings import MemoryReplySettings, ShortContextSettings
+from kaka_core.context.recent import ShortContextItem, format_short_context, load_short_context
 from kaka_core.llm.client import ChatMessage
 from kaka_core.memory.search import MemorySearchFilters, MemorySearchResult, search_user_memories
 from kaka_core.storage.database import create_session_factory, init_database
@@ -32,30 +33,38 @@ class ReplyContext:
     messages: tuple[ChatMessage, ...]
     metadata: dict[str, object]
     memories: tuple[MemorySearchResult, ...] = ()
+    short_context: tuple[ShortContextItem, ...] = ()
 
 
 def build_reply_context(
     event: MessageEvent,
     memory_settings: MemoryReplySettings,
+    short_context_settings: ShortContextSettings,
 ) -> ReplyContext:
     """组装聊天模型输入。
 
-    当前第一版只包含基础人设、长期记忆和当前消息；后续可以继续添加
-    recent_context、emotion_context、relationship_context 等部分。
+    当前包含基础人设、长期记忆、短期上下文和当前消息；后续可以继续添加
+    emotion_context、relationship_context 等部分。
     """
 
     user_text = event.content.text or ""
     memory_results, memory_metadata = load_memory_context(event, user_text, memory_settings)
+    short_context_items, short_context_metadata = load_short_context_safely(
+        event,
+        user_text,
+        short_context_settings,
+    )
 
     speaker_name = event.display_name or event.user_id
     system_prompt = build_system_prompt(memory_results, speaker_name)
-    user_prompt = build_user_prompt(event, user_text)
+    user_prompt = build_user_prompt(event, user_text, short_context_items)
     metadata: dict[str, object] = {
         "memory_injection_enabled": memory_settings.enabled,
         "memory_count": len(memory_results),
         "used_memory_ids": [result.memory.id for result in memory_results],
     }
     metadata.update(memory_metadata)
+    metadata.update(short_context_metadata)
 
     return ReplyContext(
         messages=(
@@ -64,6 +73,7 @@ def build_reply_context(
         ),
         metadata=metadata,
         memories=tuple(memory_results),
+        short_context=tuple(short_context_items),
     )
 
 
@@ -106,6 +116,37 @@ def load_memory_context(
     }
 
 
+def load_short_context_safely(
+    event: MessageEvent,
+    user_text: str,
+    short_context_settings: ShortContextSettings,
+) -> tuple[list[ShortContextItem], dict[str, object]]:
+    """读取短期上下文。
+
+    短期上下文读取失败不能影响聊天主流程，因此这里会把异常降级为 metadata。
+    """
+
+    if not user_text.strip():
+        return [], {
+            "short_context_enabled": short_context_settings.enabled,
+            "short_context_count": 0,
+            "short_context_input_ids": [],
+        }
+
+    try:
+        init_database()
+        session_factory = create_session_factory()
+        with session_factory() as session:
+            return load_short_context(session, event, short_context_settings)
+    except Exception as exc:  # noqa: BLE001
+        return [], {
+            "short_context_enabled": short_context_settings.enabled,
+            "short_context_count": 0,
+            "short_context_input_ids": [],
+            "short_context_error": str(exc),
+        }
+
+
 def build_system_prompt(memory_results: list[MemorySearchResult], speaker_name: str) -> str:
     if not memory_results:
         return SYSTEM_PROMPT
@@ -132,7 +173,21 @@ def build_system_prompt(memory_results: list[MemorySearchResult], speaker_name: 
     return "\n".join(lines)
 
 
-def build_user_prompt(event: MessageEvent, user_text: str) -> str:
+def build_user_prompt(
+    event: MessageEvent,
+    user_text: str,
+    short_context_items: list[ShortContextItem] | None = None,
+) -> str:
     display_name = event.display_name or event.user_id
     scene_hint = f"当前场景：{event.platform}/{event.scene_type}，说话的人：{display_name}。"
-    return f"{scene_hint}\n用户消息：{user_text}"
+    if not short_context_items:
+        return f"{scene_hint}\n用户消息：{user_text}"
+    return "\n".join(
+        [
+            scene_hint,
+            "近期对话（从旧到新，供理解上下文，不要机械复述）：",
+            format_short_context(short_context_items),
+            "",
+            f"当前用户消息：{user_text}",
+        ]
+    )

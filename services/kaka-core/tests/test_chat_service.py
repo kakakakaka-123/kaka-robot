@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 
@@ -31,7 +32,7 @@ class FakeRouter:
         self.messages = messages
         assert messages[0].role == "system"
         assert "卡咔" in messages[0].content
-        assert "用户消息：你好" in messages[1].content
+        assert "用户消息：你好" in messages[1].content or "当前用户消息：你好" in messages[1].content
         return "我在，刚刚听见了。"
 
 
@@ -48,12 +49,14 @@ class BypassLockState:
 
 def make_event() -> MessageEvent:
     return MessageEvent(
+        event_id="chat-event-1",
         platform=Platform.QQ,
         scene_type=SceneType.PRIVATE,
         scene_id="10001",
         user_id="10001",
         display_name="主人",
         content=MessageContent.text_message("你好"),
+        timestamp=datetime(2026, 5, 5, 1, 10, tzinfo=timezone.utc),
     )
 
 
@@ -306,6 +309,58 @@ def test_observe_does_not_reset_analyzed_input(monkeypatch, tmp_path) -> None:
     get_settings.cache_clear()
 
 
+@pytest.mark.anyio
+async def test_generate_chat_response_injects_short_context(monkeypatch, tmp_path) -> None:
+    database_url = f"sqlite:///{tmp_path / 'short-context-test.sqlite3'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("LLM_ENABLED", "true")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("SHORT_CONTEXT_ENABLED", "true")
+    monkeypatch.setenv("SHORT_CONTEXT_LIMIT", "8")
+    monkeypatch.setenv("SHORT_CONTEXT_MAX_CHARS", "1200")
+    monkeypatch.setenv("SHORT_CONTEXT_WINDOW_MINUTES", "30")
+    get_settings.cache_clear()
+    seed_short_context_database(database_url)
+
+    router = FakeRouter()
+    response = await generate_chat_response(make_event(), router=router)
+    user_prompt = router.messages[1].content
+
+    assert "近期对话" in user_prompt
+    assert "群友A：同场景消息 1" not in user_prompt
+    assert "群友A：过期消息" not in user_prompt
+    assert "群友A：同场景消息 2" in user_prompt
+    assert "群友A：同场景消息 9" in user_prompt
+    assert "卡咔：回复 9" in user_prompt
+    assert "其他场景消息" not in user_prompt
+    assert "当前用户消息：你好" in user_prompt
+    assert response.metadata["short_context_enabled"] is True
+    assert response.metadata["short_context_count"] == 8
+    assert response.metadata["short_context_input_ids"] == list(range(2, 10))
+    assert response.metadata["short_context_window_minutes"] == 30
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_generate_chat_response_can_disable_short_context(monkeypatch, tmp_path) -> None:
+    database_url = f"sqlite:///{tmp_path / 'short-context-disabled-test.sqlite3'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("LLM_ENABLED", "true")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("SHORT_CONTEXT_ENABLED", "false")
+    get_settings.cache_clear()
+    seed_short_context_database(database_url)
+
+    router = FakeRouter()
+    response = await generate_chat_response(make_event(), router=router)
+
+    assert "近期对话" not in router.messages[1].content
+    assert response.metadata["short_context_enabled"] is False
+    assert response.metadata["short_context_count"] == 0
+    assert response.metadata["short_context_input_ids"] == []
+    get_settings.cache_clear()
+
+
 def seed_memory_database(database_url: str) -> None:
     engine = create_database_engine(database_url)
     init_database(engine)
@@ -341,6 +396,107 @@ def seed_memory_database(database_url: str) -> None:
                 merge_reason="测试记忆",
                 created_at=utc_now(),
                 updated_at=utc_now(),
+            )
+        )
+        session.commit()
+
+
+def seed_short_context_database(database_url: str) -> None:
+    engine = create_database_engine(database_url)
+    init_database(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    with session_factory() as session:
+        user = UserRecord(
+            platform="qq",
+            platform_user_id="10001",
+            display_name="群友A",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        scene = SceneRecord(
+            platform="qq",
+            scene_type="private",
+            scene_id="10001",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        other_scene = SceneRecord(
+            platform="qq",
+            scene_type="group",
+            scene_id="20002",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        session.add_all([user, scene, other_scene])
+        session.flush()
+
+        for index in range(1, 10):
+            input_record = InputRecord(
+                event_id=f"short-context-{index}",
+                user=user,
+                scene=scene,
+                content_type="text",
+                content_text=f"同场景消息 {index}",
+                raw_event={},
+                extra_metadata={},
+                analysis_status="not_analyzed",
+                created_at=datetime(2026, 5, 5, 1, index, tzinfo=timezone.utc),
+            )
+            session.add(input_record)
+            session.flush()
+            if index % 2 == 1:
+                session.add(
+                    OutputRecord(
+                        output_id=f"short-context-output-{index}",
+                        input=input_record,
+                        scene=scene,
+                        user=user,
+                        output_origin="passive",
+                        output_reason="private",
+                        should_reply=True,
+                        content_text=f"回复 {index}",
+                        extra_metadata={},
+                        created_at=datetime(2026, 5, 5, 1, index, 1, tzinfo=timezone.utc),
+                    )
+                )
+
+        session.add(
+            InputRecord(
+                event_id="short-context-other-scene",
+                user=user,
+                scene=other_scene,
+                content_type="text",
+                content_text="其他场景消息",
+                raw_event={},
+                extra_metadata={},
+                analysis_status="not_analyzed",
+                created_at=datetime(2026, 5, 5, 2, 0, tzinfo=timezone.utc),
+            )
+        )
+        session.add(
+            InputRecord(
+                event_id="short-context-expired",
+                user=user,
+                scene=scene,
+                content_type="text",
+                content_text="过期消息",
+                raw_event={},
+                extra_metadata={},
+                analysis_status="not_analyzed",
+                created_at=datetime(2026, 5, 5, 0, 30, tzinfo=timezone.utc),
+            )
+        )
+        session.add(
+            InputRecord(
+                event_id=make_event().event_id,
+                user=user,
+                scene=scene,
+                content_type="text",
+                content_text="你好",
+                raw_event={},
+                extra_metadata={},
+                analysis_status="not_analyzed",
+                created_at=make_event().timestamp,
             )
         )
         session.commit()

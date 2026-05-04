@@ -85,6 +85,9 @@ def get_admin_summary(session: Session) -> dict[str, Any]:
             "memory_reply_injection_enabled": settings.memory_reply.enabled,
             "memory_reply_limit": settings.memory_reply.limit,
             "memory_reply_min_score": settings.memory_reply.min_score,
+            "short_context_enabled": settings.short_context.enabled,
+            "short_context_limit": settings.short_context.limit,
+            "short_context_max_chars": settings.short_context.max_chars,
             "admin_local_only": settings.admin.local_only,
             "admin_api_token_configured": bool(settings.admin.api_token),
         },
@@ -514,7 +517,7 @@ def preview_reply_context(
         private=private,
         display_name=display_name,
     )
-    reply_context = build_reply_context(event, settings.memory_reply)
+    reply_context = build_reply_context(event, settings.memory_reply, settings.short_context)
     messages = [
         {
             "role": message.role,

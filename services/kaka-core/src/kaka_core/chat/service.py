@@ -209,7 +209,11 @@ async def generate_chat_response(
                 return response
 
             llm_router = router or LLMRouter(settings.llm)
-            reply_context = build_reply_context(event, settings.memory_reply)
+            reply_context = build_reply_context(
+                event,
+                settings.memory_reply,
+                settings.short_context,
+            )
 
             try:
                 reply = await llm_router.chat(list(reply_context.messages))
