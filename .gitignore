@@ -1,0 +1,39 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache and build outputs
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+pytest-tmp/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# Frontend dependencies and build caches
+node_modules/
+apps/web-console/node_modules/
+apps/web-console/.vite/
+*.tsbuildinfo
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Local runtime data
+data/*
+!data/.gitkeep
+!data/media/
+data/media/*
+!data/media/.gitkeep
+
+# IDE and OS files
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
