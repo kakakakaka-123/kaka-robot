@@ -43,7 +43,7 @@ def test_admin_summary_and_lists(monkeypatch, tmp_path):
     assert summary.status_code == 200
     assert summary.json()["counts"]["pending_candidates"] == 1
     assert candidates.status_code == 200
-    assert candidates.json()["items"][0]["candidate_memory"] == "用户正在开发卡咔 v2。"
+    assert candidates.json()["items"][0]["candidate_memory"] == "用户正在开发卡咔。"
     assert memories.status_code == 200
     assert memories.json()["items"][0]["memory_text"] == "用户喜欢直接的回答。"
     assert conversations.status_code == 200
@@ -183,7 +183,7 @@ def seed_admin_data() -> None:
             user=user,
             scene=scene,
             content_type="text",
-            content_text="我正在开发卡咔 v2。",
+            content_text="我正在开发卡咔。",
             raw_event={},
             extra_metadata={},
             analysis_status="analyzed",
@@ -198,7 +198,7 @@ def seed_admin_data() -> None:
                 source_user_id=user.id,
                 source_scene_id=scene.id,
                 source_text=input_record.content_text or "",
-                candidate_memory="用户正在开发卡咔 v2。",
+                candidate_memory="用户正在开发卡咔。",
                 memory_type="user_fact",
                 confidence=0.85,
                 reason="项目长期事实",

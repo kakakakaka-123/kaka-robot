@@ -349,9 +349,9 @@ def mount_web_console(app) -> None:
         return HTMLResponse(
             """
             <html>
-              <head><title>Kaka Admin</title></head>
+              <head><title>卡咔管理</title></head>
               <body style="font-family: sans-serif; padding: 32px">
-                <h1>Kaka Admin Console</h1>
+                <h1>卡咔管理平台</h1>
                 <p>Web console has not been built yet.</p>
                 <p>Run <code>npm install</code> and <code>npm run build</code> in
                 <code>apps/web-console</code>, then restart kaka-core.</p>

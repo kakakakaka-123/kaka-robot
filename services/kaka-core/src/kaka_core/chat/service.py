@@ -10,8 +10,10 @@ from kaka_core.storage.repository import (
     load_input_by_event_id,
     load_output_for_input,
     output_record_to_response,
+    release_event_processing_lock,
     save_conversation,
     save_observed_input,
+    try_acquire_event_processing_lock,
 )
 from kaka_protocol import KakaResponse, MessageEvent
 
@@ -24,6 +26,8 @@ class EventLockState:
 
 _event_lock_guard = asyncio.Lock()
 _event_locks: dict[str, EventLockState] = {}
+EVENT_PROCESSING_LOCK_LEASE_SECONDS = 300
+EVENT_PROCESSING_LOCK_POLL_SECONDS = 0.25
 
 
 def generate_fallback_response(event: MessageEvent, reason: str | None = None) -> KakaResponse:
@@ -185,9 +189,10 @@ async def generate_chat_response(
     """
 
     lock_state = await acquire_event_lock(event.event_id)
+    db_lock_owner: str | None = None
     try:
         async with lock_state.lock:
-            existing_response = load_existing_response_safely(event)
+            existing_response, db_lock_owner = await reserve_event_processing_turn(event)
             if existing_response is not None:
                 return existing_response
 
@@ -220,4 +225,53 @@ async def generate_chat_response(
             record_conversation_safely(event, response)
             return response
     finally:
+        if db_lock_owner is not None:
+            release_event_processing_lock_safely(event.event_id, db_lock_owner)
         await release_event_lock(event.event_id, lock_state)
+
+
+async def reserve_event_processing_turn(event: MessageEvent) -> tuple[KakaResponse | None, str | None]:
+    """等待轮到当前事件处理。
+
+    先检查数据库里是否已经有输出。如果没有，则尝试获取跨进程事件锁。
+    没抢到时持续轮询，直到已有输出可复用或成功拿到锁。
+    """
+
+    lease_seconds = EVENT_PROCESSING_LOCK_LEASE_SECONDS
+    while True:
+        existing_response = load_existing_response_safely(event)
+        if existing_response is not None:
+            return existing_response, None
+
+        try:
+            owner_token = acquire_event_processing_lock_safely(
+                event.event_id,
+                lease_seconds=lease_seconds,
+            )
+        except Exception:  # noqa: BLE001
+            return None, None
+        if owner_token is not None:
+            return None, owner_token
+
+        await asyncio.sleep(EVENT_PROCESSING_LOCK_POLL_SECONDS)
+
+
+def acquire_event_processing_lock_safely(event_id: str, *, lease_seconds: int) -> str | None:
+    init_database()
+    session_factory = create_session_factory()
+    with session_factory() as session:
+        return try_acquire_event_processing_lock(
+            session,
+            event_id,
+            lease_seconds=lease_seconds,
+        )
+
+
+def release_event_processing_lock_safely(event_id: str, owner_token: str) -> None:
+    try:
+        init_database()
+        session_factory = create_session_factory()
+        with session_factory() as session:
+            release_event_processing_lock(session, event_id, owner_token)
+    except Exception:  # noqa: BLE001
+        return

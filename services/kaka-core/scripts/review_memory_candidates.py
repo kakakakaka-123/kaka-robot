@@ -91,7 +91,7 @@ RELATION_LABELS = (
     "爸爸",
 )
 
-REVIEW_SYSTEM_PROMPT = """你是卡咔 v2 的长期记忆候选复核器。
+REVIEW_SYSTEM_PROMPT = """你是卡咔 的长期记忆候选复核器。
 你的任务是判断 memory_candidates.pending 是否应该进入正式 memories。
 
 只允许输出 JSON 数组，不要输出 Markdown，不要解释 JSON 之外的内容。

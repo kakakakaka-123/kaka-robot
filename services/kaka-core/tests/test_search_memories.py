@@ -83,7 +83,7 @@ def test_search_returns_only_active_current_user_and_relevant_general_memories()
             session,
             user,
             scene,
-            "用户正在开发卡咔 v2 的长期记忆检索。",
+            "用户正在开发卡咔 的长期记忆检索。",
             memory_type="user_fact",
             confidence=0.8,
         )
@@ -116,7 +116,7 @@ def test_search_returns_only_active_current_user_and_relevant_general_memories()
             session,
             other_user,
             scene,
-            "用户正在开发卡咔 v2 的长期记忆检索。",
+            "用户正在开发卡咔 的长期记忆检索。",
             memory_type="user_fact",
             confidence=0.9,
         )
@@ -135,7 +135,7 @@ def test_search_returns_only_active_current_user_and_relevant_general_memories()
         results = module.rank_memories(rows, filters)
 
     result_texts = [result.memory.memory_text for result in results]
-    assert result_texts[0] == "用户正在开发卡咔 v2 的长期记忆检索。"
+    assert result_texts[0] == "用户正在开发卡咔 的长期记忆检索。"
     assert "用户喜欢直接、务实的回答。" in result_texts
     assert "用户喜欢喝咖啡。" not in result_texts
     assert "用户正在开发旧版记忆系统。" not in result_texts

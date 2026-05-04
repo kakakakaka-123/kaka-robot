@@ -1,6 +1,6 @@
 # QQ 适配器说明
 
-`apps/qq-adapter` 是卡咔 v2 的 QQ 接入层。
+`apps/qq-adapter` 是卡咔的 QQ 接入层。
 
 它只负责 QQ 消息收发和协议转换，不负责人格、记忆、关系和 LLM 调用决策。
 

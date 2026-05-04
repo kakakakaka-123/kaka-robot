@@ -234,3 +234,19 @@ class OutputRecord(Base):
     input: Mapped[InputRecord | None] = relationship(back_populates="output")
     scene: Mapped[SceneRecord] = relationship()
     user: Mapped[UserRecord | None] = relationship()
+
+
+class EventProcessingLockRecord(Base):
+    """跨进程事件处理锁。"""
+
+    __tablename__ = "event_processing_locks"
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner_token: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    leased_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+    )

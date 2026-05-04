@@ -41,6 +41,11 @@ class SlowFakeRouter(FakeRouter):
         return await super().chat(messages)
 
 
+class BypassLockState:
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+
+
 def make_event() -> MessageEvent:
     return MessageEvent(
         platform=Platform.QQ,
@@ -212,6 +217,48 @@ async def test_concurrent_duplicate_chat_event_reuses_single_llm_call(monkeypatc
 
     event = make_event()
     router = SlowFakeRouter()
+    first_response, second_response = await asyncio.gather(
+        generate_chat_response(event, router=router),
+        generate_chat_response(event, router=router),
+    )
+
+    engine = create_database_engine(database_url)
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as session:
+        inputs = session.scalars(select(InputRecord)).all()
+        outputs = session.scalars(select(OutputRecord)).all()
+
+    assert router.calls == 1
+    assert len(inputs) == 1
+    assert len(outputs) == 1
+    assert second_response.response_id == first_response.response_id
+    assert {first_response.metadata.get("deduplicated"), second_response.metadata.get("deduplicated")} == {
+        None,
+        True,
+    }
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_concurrent_duplicate_chat_event_is_deduped_by_database_lock(monkeypatch, tmp_path) -> None:
+    database_url = f"sqlite:///{tmp_path / 'db-lock-dedupe-chat-test.sqlite3'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("LLM_ENABLED", "true")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    get_settings.cache_clear()
+
+    event = make_event()
+    router = SlowFakeRouter()
+
+    async def bypass_acquire_event_lock(_event_id: str) -> BypassLockState:
+        return BypassLockState()
+
+    async def bypass_release_event_lock(_event_id: str, _state: BypassLockState) -> None:
+        return None
+
+    monkeypatch.setattr("kaka_core.chat.service.acquire_event_lock", bypass_acquire_event_lock)
+    monkeypatch.setattr("kaka_core.chat.service.release_event_lock", bypass_release_event_lock)
+
     first_response, second_response = await asyncio.gather(
         generate_chat_response(event, router=router),
         generate_chat_response(event, router=router),

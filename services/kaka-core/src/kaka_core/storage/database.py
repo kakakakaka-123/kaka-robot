@@ -1,3 +1,4 @@
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -6,6 +7,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from kaka_core.config.settings import get_settings
 from kaka_core.storage.models import Base
+
+_DATABASE_INIT_LOCK = threading.Lock()
+_INITIALIZED_DATABASE_URLS: set[str] = set()
 
 EXPECTED_INPUT_COLUMNS = [
     "id",
@@ -90,6 +94,16 @@ def init_database(engine: Engine | None = None) -> None:
     """
 
     target_engine = engine or create_database_engine()
+    if engine is None:
+        database_url = target_engine.url.render_as_string(hide_password=False)
+        with _DATABASE_INIT_LOCK:
+            if database_url in _INITIALIZED_DATABASE_URLS:
+                return
+            migrate_sqlite_schema(target_engine)
+            Base.metadata.create_all(target_engine)
+            migrate_sqlite_schema(target_engine)
+            _INITIALIZED_DATABASE_URLS.add(database_url)
+        return
     migrate_sqlite_schema(target_engine)
     Base.metadata.create_all(target_engine)
     migrate_sqlite_schema(target_engine)

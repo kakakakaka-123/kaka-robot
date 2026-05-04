@@ -64,7 +64,7 @@ def test_load_candidates_can_filter_by_candidate_ids():
     session_factory = create_session_factory()
     with session_factory() as session:
         first = seed_candidate(session, "用户是物联网工程专业学生。", event_id="input-1")
-        second = seed_candidate(session, "用户正在开发卡咔 v2。", event_id="input-2")
+        second = seed_candidate(session, "用户正在开发卡咔。", event_id="input-2")
         filters = module.MergeFilters(limit=20, candidate_ids=(second.id,))
         rows = module.load_candidates(session, filters)
 

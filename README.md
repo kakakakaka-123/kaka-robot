@@ -1,6 +1,6 @@
-# 卡咔 v2
+# 卡咔
 
-卡咔 v2 是一个长期演进的 AI 人格体项目。它不是单纯的 QQ 机器人，而是以 `Kaka Core` 为核心大脑，未来可以接入 QQ、网页、语音、桌宠、AIoT 硬件和其他终端的电子生命系统。
+卡咔是一个长期演进的 AI 人格体项目。它不是单纯的 QQ 机器人，而是以 `kaka-core` 为核心大脑，未来可以接入 QQ、网页、语音、桌宠、AIoT 硬件和其他终端的电子生命系统。
 
 当前阶段的重点不是堆功能，而是先搭好清晰、可学习、可扩展的地基。
 
@@ -34,7 +34,7 @@ QQ / Web / Voice / IoT / Desktop
 Adapter 适配器层
         |
         v
-Kaka Core 核心大脑
+kaka-core 核心大脑
         |
         v
 数据库 / 向量库 / 文件库 / 模型服务 / IoT 设备
@@ -48,7 +48,7 @@ Kaka Core 核心大脑
 
 ## 当前阶段
 
-当前项目还处在 v2 地基阶段。
+当前项目还处在第一阶段地基。
 
 第一阶段目标是完成一个最小可运行闭环：
 
@@ -95,8 +95,8 @@ QQ 收到消息
 - 正式记忆查看脚本：`show_memories.py` 可按记忆 ID、状态、类型、来源、群、用户、日期查看 `memories`。
 - 正式记忆管理脚本：`manage_memories.py` 可把记忆切到 `active` / `archived`，或在确认错误、垃圾、敏感时硬删除。
 - 正式记忆检索预览脚本：`search_memories.py` 可按当前用户和当前消息，只读预览会命中的少量正式记忆。
-- 本地 Web 管理台：启动 `kaka-core` 后打开 `http://127.0.0.1:8001/admin`，日常查看和管理数据优先使用网页；当前支持总览、最近对话、输入分析状态调整、候选区状态调整、候选合并、正式记忆归档/恢复/删除、记忆检索预览和系统状态。
-- 管理 API：`/admin/api/*`，默认只允许本机访问；如果设置 `ADMIN_LOCAL_ONLY=false`，必须配置 `ADMIN_API_TOKEN` 并在请求头传 `X-Kaka-Admin-Token`。Web 管理台顶部的“管理 Token”输入框会把 token 保存在当前浏览器本地并自动带到 API 请求里。核心代码在 `services/kaka-core/src/kaka_core/api/admin_routes.py` 和 `services/kaka-core/src/kaka_core/admin/service.py`；总览里展示的数据库连接串会自动脱敏。后续面向用户的数据管理功能优先扩展这里。
+- 本地 Web 管理台：启动 `kaka-core` 后打开 `http://127.0.0.1:8001/admin`；当前 Web 界面保留总览、正式记忆归档/恢复/删除、回复检索预览、运行状态和预留扩展入口。最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，但不再作为日常 Web 页面暴露。
+- 管理 API：`/admin/api/*`，默认只允许本机访问；如果设置 `ADMIN_LOCAL_ONLY=false`，必须配置 `ADMIN_API_TOKEN` 并在请求头传 `X-Kaka-Admin-Token`。Web 管理台顶部的“管理 Token”输入框会把 token 暂存在当前浏览器会话里并自动带到 API 请求里。核心代码在 `services/kaka-core/src/kaka_core/api/admin_routes.py` 和 `services/kaka-core/src/kaka_core/admin/service.py`；总览里展示的数据库连接串会自动脱敏。后续面向用户的数据管理功能优先扩展这里。
 - 长期记忆 E2E 测试造数脚本：`seed_memory_e2e_data.py` 只用于本地测试，默认预览，加 `--apply` 才写入测试输入。
 - 程序内置自动候选分析：可选开启后，`kaka-core` 在下一个整点及之后每个整点检查一次；`not_analyzed >= 50` 时最多处理两轮，每轮 50 条。
 - 程序内置自动候选区复核：可选开启后，`kaka-core` 在下一个整点及之后每个整点检查一次；`pending >= 20` 时最多处理一批，每批 10 条。
@@ -201,17 +201,17 @@ kaka-v2/
 如果是第一次看这个项目，建议按这个顺序读：
 
 1. `README.md`
-2. `KAKA_V2_HANDOFF.md`
+2. `KAKA_HANDOFF.md`
 3. `docs/下次上下文.md`
 4. `docs/开发运行说明.md`
 5. `docs/路线图.md`
 6. `docs/长期记忆设计.md`
 7. `docs/技术栈说明.md`
-8. `卡咔-v2-电子生命系统设计文档.md`
+8. `卡咔电子生命系统设计文档.md`
 
 命名约定：
 
-- 关键入口文档保留英文名：`README.md`、`KAKA_V2_HANDOFF.md`。
+- 关键入口文档保留英文名：`README.md`、`KAKA_HANDOFF.md`。
 - `docs/` 下的说明类文档使用中文名。
 - 文件夹、Python 包、模块、脚本和配置文件继续保持英文名。
 
@@ -248,7 +248,7 @@ inputs / outputs 记录正常
 
 当前已经完成“回复时读取正式长期记忆”的第一版接入：`search_memories.py` 的检索逻辑已经抽成正式模块，`kaka-core` 回复前会按当前用户、场景和消息检索少量 `active` 记忆，并把命中的记忆作为可参考背景放进模型 prompt。这个能力可通过 `.env` 开关控制。程序里也已经内置自动候选分析和自动候选区复核，两者都在整点触发。
 
-当前也已经完成本地 Web 管理台第一版接入。用户日常查看数据库状态、调整输入分析状态、处理候选区和管理正式记忆，优先使用 `/admin`；Python 脚本主要保留给开发、测试、批量修复和应急排查。
+当前也已经完成本地 Web 管理台第一版接入。用户日常查看总览、管理正式记忆、预览回复检索和检查运行状态，优先使用 `/admin`；最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，Python 脚本主要留给开发、测试、批量修复和应急排查。
 
 当前回复记忆接入规则：
 

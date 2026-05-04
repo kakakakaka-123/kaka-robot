@@ -100,7 +100,7 @@ def test_review_batch_and_apply_approves_and_rejects_candidates():
     session_factory = create_session_factory()
     with session_factory() as session:
         user, scene = seed_user_and_scene(session)
-        approved = seed_candidate(session, user, scene, "用户正在开发卡咔 v2。")
+        approved = seed_candidate(session, user, scene, "用户正在开发卡咔。")
         rejected = seed_candidate(session, user, scene, "哈哈哈", event_id="input-2")
         rows = [
             module.CandidateReviewRow(approved, user, scene, ()),
@@ -114,7 +114,7 @@ def test_review_batch_and_apply_approves_and_rejects_candidates():
                     "type": "user_fact",
                     "confidence": 0.8,
                     "reason": "项目事实",
-                    "memory": "用户正在开发卡咔 v2。",
+                    "memory": "用户正在开发卡咔。",
                 },
                 {
                     "id": rejected.id,
@@ -139,7 +139,7 @@ def test_review_batch_and_apply_approves_and_rejects_candidates():
     assert stats.approved == 1
     assert stats.rejected == 1
     assert memory is not None
-    assert memory.memory_text == "用户正在开发卡咔 v2。"
+    assert memory.memory_text == "用户正在开发卡咔。"
     assert [candidate.status for candidate in candidates] == ["approved", "rejected"]
 
 

@@ -205,7 +205,7 @@ CANDIDATE_PATTERNS = [
     (
         "项目长期信息",
         re.compile(
-            r"(项目|卡咔 v2|机器人|数据库|文档|PyCharm|命令行|开发日志|表结构|长期记忆|"
+            r"(项目|卡咔|机器人|数据库|文档|PyCharm|命令行|开发日志|表结构|长期记忆|"
             r"用户画像|DeepSeek|LLM|NoneBot|FastAPI|SQLite|记忆候选|"
             r"毕设|毕业设计|AIoT|物联网|开题)"
         ),
@@ -313,7 +313,7 @@ LOW_VALUE_PATTERNS = [
 
 PUNCTUATION_RE = re.compile(r"^[\s\W_]+$", re.UNICODE)
 
-LLM_ANALYSIS_SYSTEM_PROMPT = """你是卡咔 v2 的长期记忆候选分析器。
+LLM_ANALYSIS_SYSTEM_PROMPT = """你是卡咔 的长期记忆候选分析器。
 你的任务是判断一条聊天输入是否值得进入长期记忆候选区。
 
 只允许输出 JSON，不要输出 Markdown，不要解释 JSON 之外的内容。
@@ -338,7 +338,7 @@ JSON 字段：
 }
 """
 
-LLM_BATCH_ANALYSIS_SYSTEM_PROMPT = """你是卡咔 v2 的长期记忆候选批量分析器。
+LLM_BATCH_ANALYSIS_SYSTEM_PROMPT = """你是卡咔 的长期记忆候选批量分析器。
 你的任务是根据同一场景的一小段聊天，判断其中 target=true 的输入是否值得进入长期记忆候选区。
 
 只允许输出 JSON 数组，不要输出 Markdown，不要解释 JSON 之外的内容。

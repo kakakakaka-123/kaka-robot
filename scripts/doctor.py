@@ -1,4 +1,4 @@
-"""卡咔 v2 本地自检工具。
+"""卡咔 本地自检工具。
 
 这个脚本会检查配置字段、项目内导入、数据库路径和常用端口。
 它不会打印 `.env` 里的密钥值。
@@ -659,7 +659,7 @@ def check_core_health(results: list[CheckResult]) -> None:
 
 
 def print_results(results: list[CheckResult]) -> None:
-    print("卡咔 v2 本地自检")
+    print("卡咔 本地自检")
     print("=" * 60)
     for result in results:
         print(f"[{result.level}] {result.title}: {result.detail}")

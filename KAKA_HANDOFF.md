@@ -1,6 +1,6 @@
-﻿# 卡咔 v2 项目交接文档
+# 卡咔项目交接文档
 
-本文档用于在新的对话框中快速恢复上下文。下一个对话框只要先阅读本文档，就应该能理解卡咔 v2 的目标、技术路线、用户偏好、旧项目经验和下一步工作。
+本文档用于在新的对话框中快速恢复上下文。下一个对话框只要先阅读本文档，就应该能理解卡咔的目标、技术路线、用户偏好、旧项目经验和下一步工作。
 
 ## 0. 最新交接摘要
 
@@ -50,7 +50,7 @@ D:\Python\AgentRobot\kaka-v2
 - `/v1/chat` 已经可以接收 `MessageEvent`，调用 DeepSeek，并返回 `KakaResponse`。
 - `/v1/observe` 已经可以只记录消息，不调用模型、不回复。
 - `qq-adapter` 已经接入 NoneBot2 和 OneBot V11。
-- NapCat 已经能把真实 QQ 私聊和群聊文本消息转发到当前 `kaka-v2`。
+- NapCat 已经能把真实 QQ 私聊和群聊文本消息转发到当前项目。
 - 卡咔已经可以在 QQ 中通过 DeepSeek 生成文本回复。
 - 群聊已加触发限制：私聊全回复，群聊只在 @机器人 或包含“卡咔”时回复；普通群聊文本不回复，但会写入 `inputs` 作为观察记录。
 - `kaka-core` 已经接入 SQLite 基础记录，默认文件为 `data/kaka.sqlite3`；`inputs` 记录卡咔收到/观察到的输入，`outputs` 记录卡咔对已处理输入形成的输出结果或响应决策，`memory_candidates` 记录长期记忆候选，`memories` 记录已合并的正式长期记忆。
@@ -70,10 +70,10 @@ D:\Python\AgentRobot\kaka-v2
 - 已有根目录 `.env.example` 配置模板。
 - 已有 `scripts/doctor.py` 本地自检脚本，用于检查配置形状、数据库、导入和端口状态。
 - 已有 `docs/长期记忆设计.md`，明确第一版记什么、不记什么、`memories` 表建议和抽取规则。
-- 已有本地 Web 管理台：前端在 `apps/web-console`，`kaka-core` 托管 `/admin`，管理 API 在 `/admin/api/*`；当前覆盖总览、最近对话、输入分析预览、输入分析状态调整、候选区状态调整、候选区合并、正式记忆归档/恢复/删除、记忆检索预览和系统状态。
-- Web 管理台已成为日常数据管理入口；脚本现在主要留给开发、测试、批量修复和应急排查。
-- 输入分析页支持按 `inputs.analysis_status` 筛选，并能把选中输入设为 `not_analyzed / analyzed / skipped`；“按规则标记 skipped”仍只标记规则判定可跳过的输入。
-- 候选区页支持按 `memory_candidates.status` 筛选，并能把选中候选设为 `pending / approved / rejected / merged_duplicate`；候选合并预览和执行只在 `pending` 视图下显示，避免误操作已处理候选。
+- 已有本地 Web 管理台：前端在 `apps/web-console`，`kaka-core` 托管 `/admin`，管理 API 在 `/admin/api/*`；当前 Web 界面只暴露总览、正式记忆归档/恢复/删除、回复检索预览、运行状态和预留扩展入口。最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，不再作为日常 Web 页面暴露。
+- Web 管理台已成为正式记忆的日常查看和管理入口；脚本现在主要留给开发、测试、批量修复、候选/输入后台处理和应急排查。
+- 近期已补上跨进程事件处理锁和 SQLite 时间戳修正，重复聊天事件在绕过进程内锁时也不会重复调用 LLM；管理总览继续脱敏 `database_url`。
+- 输入分析和候选区的写库能力仍保留在管理 API、脚本和数据库层；Web 日常页面暂不暴露这些后台处理入口。
 - 正式记忆页支持 `active / archived` 切换和确认后的硬删除；危险写库动作都有确认弹窗。
 - 脚本现在定位为开发、测试、排查和应急备用入口；用户日常管理优先使用网页。
 - 已经创建根目录 `.env`，其中有 DeepSeek API Key。`.env` 被 `.gitignore` 忽略，不要把 Key 写进任何文档或回复。
@@ -82,7 +82,7 @@ D:\Python\AgentRobot\kaka-v2
 
 ```text
 kaka-protocol：5 passed（历史完整测试记录）
-kaka-core：88 passed
+kaka-core：90 passed
 qq-adapter：18 passed（历史完整测试记录）
 doctor：56 OK, 3 WARN, 0 FAIL
 web-console：npm run build passed
@@ -160,8 +160,8 @@ D:\Python\AgentRobot\nonebot-kaka
 
 ```text
 README.md
-卡咔-v2-电子生命系统设计文档.md
-KAKA_V2_HANDOFF.md
+卡咔电子生命系统设计文档.md
+KAKA_HANDOFF.md
 .env
 .env.example
 .gitignore
@@ -176,8 +176,8 @@ services/
 开发日志/
 ```
 
-`卡咔-v2-电子生命系统设计文档.md` 是 v2 的总体设计蓝图。  
-`KAKA_V2_HANDOFF.md` 是本文件，用于给下一个对话框恢复记忆。
+`卡咔电子生命系统设计文档.md` 是项目的总体设计蓝图。
+`KAKA_HANDOFF.md` 是本文件，用于给下一个对话框恢复记忆。
 
 目前关键代码目录：
 
@@ -301,7 +301,7 @@ apps/qq-adapter/
 - 是 v1 原型。
 - 已经验证了很多想法。
 - 可以作为需求库和参考库。
-- 可以逐步迁移成熟功能到 v2。
+- 可以逐步迁移成熟功能到当前项目。
 
 旧项目的问题：
 
@@ -313,12 +313,12 @@ apps/qq-adapter/
 结论：
 
 ```text
-nonebot-kaka = v1 原型和经验库
-kaka-v2 = 长期正式地基
+nonebot-kaka = 原型和经验库
+当前卡咔项目 = 长期正式地基
 ```
 
 不要立刻删除旧项目。  
-不要直接复制旧项目代码到 v2。  
+不要直接复制旧项目代码到当前项目。
 应该参考旧项目的功能和经验，用更清晰的架构重写。
 
 ## 5. 卡咔的人设方向
@@ -356,7 +356,7 @@ kaka-v2 = 长期正式地基
 - 权限判断必须用 QQ 号。
 - 记忆存储必须用 QQ 号区分。
 
-## 6. v2 核心架构原则
+## 6. 核心架构原则
 
 最重要的原则：
 
@@ -373,7 +373,7 @@ QQ / 网页 / 语音 / 硬件 / 桌宠
 适配器层 Adapter
         |
         v
-卡咔核心大脑 Kaka Core
+卡咔核心大脑
         |
         v
 数据库 / 向量库 / 文件库 / 模型服务 / IoT 设备
@@ -382,8 +382,8 @@ QQ / 网页 / 语音 / 硬件 / 桌宠
 含义：
 
 - QQ 适配器只负责收发 QQ 消息。
-- Kaka Core 才负责人格、记忆、决策、工具、情绪和关系。
-- 未来网页、语音、AIoT 硬件都接同一个 Kaka Core。
+- 卡咔核心才负责人格、记忆、决策、工具、情绪和关系。
+- 未来网页、语音、AIoT 硬件都接同一个卡咔核心。
 - 这样卡咔可以迁移到不同载体，而不是被 QQ 框架绑死。
 
 ## 7. 推荐技术栈
@@ -460,8 +460,8 @@ Docker Compose
 
 ```text
 QQ 收到消息
--> 发送给 Kaka Core
--> Kaka Core 读取基础人格和基础记忆
+-> 发送给卡咔核心
+-> 卡咔核心读取基础人格和基础记忆
 -> 调用大模型生成回复
 -> 返回给 QQ
 -> QQ 发出去
@@ -531,8 +531,8 @@ kaka-v2/
 
   docs/
 
-  KAKA_V2_ELECTRONIC_LIFE_DESIGN.md
-  KAKA_V2_HANDOFF.md
+  卡咔电子生命系统设计文档.md
+  KAKA_HANDOFF.md
 ```
 
 各目录职责：
@@ -548,7 +548,7 @@ kaka-v2/
 - `deploy`：部署配置。
 - `docs`：技术文档和学习文档。
 
-## 10. Kaka Core 应该包含的系统
+## 10. 卡咔核心应该包含的系统
 
 ### 10.1 感知系统
 
@@ -720,7 +720,7 @@ kaka-v2/
 
 ## 11. AIoT 和毕设方向
 
-用户是物联网工程专业，因此 v2 要预留 AIoT 扩展。
+用户是物联网工程专业，因此当前项目要预留 AIoT 扩展。
 
 未来方向：
 
@@ -812,18 +812,21 @@ AIoT 交互例子：
 48. 调整 `memory_candidates`：移除旧的 `source_input_id` 唯一约束，同一条输入可以保留多条不同候选；写入逻辑按 `(source_input_id, memory_type, normalized candidate_memory)` 去重。
 49. 补管理接口保护：`/admin/api/*` 默认只允许本机访问；若设置 `ADMIN_LOCAL_ONLY=false`，必须设置 `ADMIN_API_TOKEN`，请求头使用 `X-Kaka-Admin-Token`。
 50. Web 管理台列表页补齐过滤器：最近对话、输入分析、候选区和正式记忆都能按 ID、群、用户、日期、场景等条件筛选；候选/记忆支持 `memory_type`，对话支持回复状态和输出来源/原因。
-51. 修复 Web 管理台 token 可用性：顶部新增“管理 Token”输入框，保存在当前浏览器本地，所有 `/admin/api` 请求自动带 `X-Kaka-Admin-Token`。
+51. 修复 Web 管理台 token 可用性：顶部新增“管理 Token”输入框，保存在当前浏览器会话里，所有 `/admin/api` 请求自动带 `X-Kaka-Admin-Token`。
 52. 修复 `/admin/api/*` 未知路径被前端兜底页面接住的问题，现在未知管理 API 返回明确 404。
 53. 对齐 Web Console 类型依赖：React 18 对应 `@types/react` / `@types/react-dom` 18 系列。
 54. 已对真实 `data/kaka.sqlite3` 执行一次显式迁移，移除旧 `memory_candidates.source_input_id` 唯一索引；迁移前做过一次临时备份，确认迁移无误后已清理。
 55. 再次收紧 `.gitignore`：`data/media/*` 默认忽略，只保留 `data/media/.gitkeep`，避免后续媒体文件被误加入 Git。
 56. 补充并发幂等：`generate_chat_response` 现在按 `event_id` 加进程内异步锁，同一事件并发进入时只会有一次 LLM 调用，后续请求复用已保存 output。
+57. 修复 SQLite 事件处理锁的时间戳比较问题，跨进程重复聊天事件现在也能稳定复用已保存 output，不会因为 `leased_until` 时区比较失败而重复调用 LLM。
+58. 精简 Web 管理台日常页面：保留总览、正式记忆、回复检索、运行状态和预留扩展入口；最近对话、输入分析、候选区能力保留在 API、脚本和数据库中。
+59. 统一项目展示名为“卡咔”，入口文档改为 `KAKA_HANDOFF.md` 和 `卡咔电子生命系统设计文档.md`；技术目录、包名、环境变量和实际仓库路径继续保留英文/现有路径。
 
 2026-05-04 本轮检查验证结果：
 
 ```text
 kaka-protocol：5 passed
-kaka-core：88 passed
+kaka-core：90 passed
 qq-adapter：18 passed
 web-console：npm run build passed
 compileall：passed
@@ -838,8 +841,8 @@ doctor：56 OK, 3 WARN, 0 FAIL
 下一步建议按顺序做：
 
 1. 启动 `kaka-core`，打开 `http://127.0.0.1:8001/admin` 做一次手动验收。
-2. 检查输入分析页是否能筛选和调整 `not_analyzed / analyzed / skipped`。
-3. 检查候选区页是否能筛选和调整 `pending / approved / rejected / merged_duplicate`。
+2. 检查左侧导航的总览、正式记忆、回复检索、运行状态和预留扩展是否正常。
+3. 在正式记忆页复查归档、恢复和确认后硬删除。
 4. 再启动 `qq-adapter` 保持真实 QQ 对话运行，观察自动候选分析和自动候选区复核是否稳定。
 5. 用响应 metadata 或数据库输出记录回查 `used_memory_ids`。
 6. 偶尔查看 `memories`，不合适的记忆优先 `archived`，确认错误、垃圾或敏感再硬删除。
@@ -861,7 +864,7 @@ QQ 发一句话
 -> show_memories.py 能查看正式记忆
 -> search_memories.py 能预览回复前可能命中的记忆
 -> manage_memories.py 能把不合适的正式记忆归档或删除
--> /admin 能完成日常最近对话、输入分析、候选区和正式记忆管理
+-> /admin 能完成总览查看、正式记忆管理、回复检索预览和运行状态检查
 -> 重复 QQ 事件不会重复调用 LLM 或重置分析状态
 -> 一条 input 可以产生多条不同 memory_candidates
 -> doctor.py 没有 FAIL
@@ -873,7 +876,7 @@ QQ 发一句话
 
 如果明天用户在新对话框继续，优先做这些事：
 
-1. 阅读 `KAKA_V2_HANDOFF.md`、`docs/下次上下文.md`、`docs/开发运行说明.md`。
+1. 阅读 `KAKA_HANDOFF.md`、`docs/下次上下文.md`、`docs/开发运行说明.md`。
 2. 不要读取 `.env`，里面有 DeepSeek API Key。
 3. 让用户用 PyCharm 启动：
 
@@ -913,10 +916,10 @@ services/kaka-core/scripts/seed_memory_e2e_data.py
 如果下一个对话框继续开发，请先阅读：
 
 ```text
-KAKA_V2_HANDOFF.md
+KAKA_HANDOFF.md
 docs/下次上下文.md
 docs/开发运行说明.md
-卡咔-v2-电子生命系统设计文档.md
+卡咔电子生命系统设计文档.md
 ```
 
 然后再开始工作。
@@ -931,7 +934,7 @@ docs/开发运行说明.md
 - 以后能不能替换。
 
 开发时不要盲目追求一次性完美。  
-卡咔 v2 应该是长期成长项目，第一目标是结构正确、用户能理解、未来能扩展。
+卡咔应该是长期成长项目，第一目标是结构正确、用户能理解、未来能扩展。
 
 特别提醒：
 
@@ -940,5 +943,5 @@ docs/开发运行说明.md
 - 用户使用 PyCharm，偏好直接运行 `services/kaka-core/run.py` 这类入口文件。
 - 用户不会经常使用命令行参数，也不容易记住 `--group`、`--date`、`--mark-skipped` 这类关键词。因此所有开发辅助脚本都应该在 Python 文件顶部写清楚脚本用途、PyCharm 改哪一行、可用参数、哪些参数会修改数据库、常用例子。
 - 用户希望 Python 文件里的注释和 docstring 尽量使用中文，并且关键处适当解释；技术名词、接口字段、环境变量名和第三方固定标记可以保留原文。
-- 文档命名风格：`README.md` 和 `KAKA_V2_HANDOFF.md` 保持英文名；`docs/` 下说明类 Markdown 使用中文名；文件夹、Python 包、模块、脚本和配置文件保持英文名。
+- 文档命名风格：`README.md` 和 `KAKA_HANDOFF.md` 保持英文名；`docs/` 下说明类 Markdown 使用中文名；文件夹、Python 包、模块、脚本和配置文件保持英文名。
 - 用户希望每次引入技术时解释清楚“它是什么、解决什么问题、为什么现在需要或暂时不需要”。

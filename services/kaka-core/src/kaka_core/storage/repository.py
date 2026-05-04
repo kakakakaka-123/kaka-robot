@@ -1,11 +1,17 @@
-from sqlalchemy import select
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
+from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from kaka_core.storage.models import (
+    EventProcessingLockRecord,
     InputRecord,
     OutputRecord,
     SceneRecord,
     UserRecord,
+    utc_now,
 )
 from kaka_protocol import ActionType, KakaResponse, MessageEvent
 
@@ -106,6 +112,76 @@ def load_input_by_event_id(session: Session, event_id: str) -> InputRecord | Non
     return session.scalar(select(InputRecord).where(InputRecord.event_id == event_id))
 
 
+def try_acquire_event_processing_lock(
+    session: Session,
+    event_id: str,
+    *,
+    lease_seconds: int = 300,
+) -> str | None:
+    """尝试获取事件处理锁。
+
+    返回 owner_token 表示已获取锁；返回 None 表示当前有其他处理者在工作。
+    """
+
+    now = _as_utc_naive(utc_now())
+    lease_until = now + timedelta(seconds=lease_seconds)
+    owner_token = uuid4().hex
+
+    existing = session.get(EventProcessingLockRecord, event_id)
+    if existing is None:
+        session.add(
+            EventProcessingLockRecord(
+                event_id=event_id,
+                owner_token=owner_token,
+                leased_until=lease_until,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        try:
+            session.commit()
+            return owner_token
+        except IntegrityError:
+            session.rollback()
+            existing = session.get(EventProcessingLockRecord, event_id)
+
+    if existing is not None and _as_utc_naive(existing.leased_until) > now:
+        session.rollback()
+        return None
+
+    updated = session.execute(
+        update(EventProcessingLockRecord)
+        .where(
+            EventProcessingLockRecord.event_id == event_id,
+            EventProcessingLockRecord.leased_until <= now,
+        )
+        .values(
+            owner_token=owner_token,
+            leased_until=lease_until,
+            updated_at=now,
+        )
+    ).rowcount
+    if updated:
+        session.commit()
+        return owner_token
+
+    session.rollback()
+    return None
+
+
+def release_event_processing_lock(session: Session, event_id: str, owner_token: str) -> None:
+    """释放事件处理锁。"""
+
+    deleted = session.execute(
+        delete(EventProcessingLockRecord).where(
+            EventProcessingLockRecord.event_id == event_id,
+            EventProcessingLockRecord.owner_token == owner_token,
+        )
+    ).rowcount
+    if deleted:
+        session.commit()
+
+
 def load_output_for_input(session: Session, input_record: InputRecord) -> OutputRecord | None:
     """读取某条输入已经关联的输出决策。"""
 
@@ -194,3 +270,9 @@ def _first_text_action(response: KakaResponse) -> str | None:
         if action.content.text:
             return action.content.text
     return None
+
+
+def _as_utc_naive(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)

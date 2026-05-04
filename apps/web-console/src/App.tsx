@@ -2,24 +2,25 @@ import {
   Archive,
   Brain,
   CheckCircle2,
-  GitMerge,
+  Clock3,
+  HardDrive,
   LayoutDashboard,
-  MessageSquareText,
-  RotateCcw,
+  Moon,
+  RefreshCw,
   Search,
-  ServerCog,
   ShieldCheck,
-  Sparkles,
-  Trash2
+  Sun,
+  Trash2,
+  Wrench
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 type Summary = {
   counts: Record<string, number>;
-  candidate_statuses: Record<string, number>;
   memory_statuses: Record<string, number>;
-  input_statuses: Record<string, number>;
-  settings: Record<string, string | number | boolean>;
+  settings: Record<string, string | number | boolean | null | undefined>;
   server_time: string;
 };
 
@@ -34,45 +35,19 @@ type SceneInfo = {
   scene_id: string;
 };
 
-type Conversation = {
-  id: number;
-  content_text: string;
-  analysis_status: string;
-  created_at: string;
-  reply_state: string;
-  user: UserInfo;
-  scene: SceneInfo;
-  output?: { content_text: string; output_origin: string; output_reason: string } | null;
-};
-
-type InputPreview = Conversation & {
-  analysis_label?: string;
-  analysis_reason?: string;
-  can_mark_skipped?: boolean;
-};
-
-type Candidate = {
-  id: number;
-  source_input_id: number;
-  candidate_memory: string;
-  source_text: string;
-  memory_type: string;
-  confidence: number;
-  reason: string;
-  status: string;
-  created_at: string;
-  user: UserInfo;
-  scene: SceneInfo;
-};
-
 type Memory = {
   id: number;
-  candidate_id?: number | null;
   source_candidate_id?: number | null;
+  candidate_id?: number | null;
   memory_text: string;
+  normalized_text: string;
   memory_type: string;
   confidence: number;
+  source_text: string;
+  source: string;
   status: string;
+  merge_reason: string;
+  created_at: string;
   updated_at: string;
   user?: UserInfo | null;
   scene?: SceneInfo | null;
@@ -94,72 +69,95 @@ type SearchForm = {
   min_score: number;
 };
 
-type ListFilters = {
+type MemoryFilters = {
   ids: string;
-  group_id: string;
   user_id: string;
+  group_id: string;
   date: string;
-  scene_type: string;
   memory_type: string;
-  reply_state: string;
-  output_origin: string;
-  output_reason: string;
 };
 
-const tabs = [
-  { id: "overview", label: "总览", icon: LayoutDashboard },
-  { id: "conversations", label: "最近对话", icon: MessageSquareText },
-  { id: "inputs", label: "输入分析", icon: Sparkles },
-  { id: "candidates", label: "候选区", icon: GitMerge },
-  { id: "memories", label: "正式记忆", icon: Brain },
-  { id: "search", label: "检索预览", icon: Search },
-  { id: "system", label: "系统状态", icon: ServerCog }
-] as const;
+type MemoryStatusFilter = "active" | "archived" | "all";
+type PageKey = "overview" | "memories" | "search" | "status" | "reserved";
+type ThemeMode = "light" | "dark";
 
-type TabId = (typeof tabs)[number]["id"];
-
-type NoticeKind = "info" | "success";
-
-const candidateStatusOptions = ["pending", "approved", "rejected", "merged_duplicate", "all"];
-const inputStatusOptions = ["not_analyzed", "analyzed", "skipped", "all"];
-const memoryStatusOptions = ["active", "archived", "all"];
-const sceneTypeOptions = [
-  { value: "", label: "全部场景" },
-  { value: "group", label: "群聊" },
-  { value: "private", label: "私聊" }
-];
-const replyStateOptions = [
-  { value: "", label: "全部回复" },
-  { value: "replied", label: "已回复" },
-  { value: "no_reply", label: "不回复" },
-  { value: "observed", label: "仅观察" }
-];
-const emptyListFilters: ListFilters = {
-  ids: "",
-  group_id: "",
-  user_id: "",
-  date: "",
-  scene_type: "",
-  memory_type: "",
-  reply_state: "",
-  output_origin: "",
-  output_reason: ""
+type NavItem = {
+  id: PageKey;
+  label: string;
+  icon: LucideIcon;
 };
+
 const adminTokenStorageKey = "kaka_admin_token";
+const themeStorageKey = "kaka_admin_theme";
+
+const memoryStatusOptions: { value: MemoryStatusFilter; label: string }[] = [
+  { value: "active", label: "使用中" },
+  { value: "archived", label: "已归档" },
+  { value: "all", label: "全部" }
+];
+
+const memoryTypeOptions = [
+  { value: "", label: "全部类型" },
+  { value: "user_fact", label: "用户事实" },
+  { value: "stable_preference", label: "稳定偏好" },
+  { value: "relationship_fact", label: "关系事实" },
+  { value: "important_event", label: "重要事件" },
+  { value: "fact", label: "事实" },
+  { value: "preference", label: "偏好" }
+];
+
+const mainNavItems: NavItem[] = [
+  { id: "overview", label: "总览", icon: LayoutDashboard },
+  { id: "memories", label: "正式记忆", icon: Brain },
+  { id: "search", label: "回复检索", icon: Search },
+  { id: "status", label: "运行状态", icon: ShieldCheck }
+];
+
+const reservedNavItem: NavItem = { id: "reserved", label: "预留扩展", icon: Wrench };
+
+const pageCopy: Record<PageKey, { title: string; desc: string }> = {
+  overview: {
+    title: "总览",
+    desc: "查看卡咔当前记忆规模、回复注入和运行概况。"
+  },
+  memories: {
+    title: "正式记忆",
+    desc: "查看、筛选、归档、恢复和硬删除已经写入长期库的记忆。"
+  },
+  search: {
+    title: "回复检索",
+    desc: "模拟回复前的记忆检索，检查当前消息会命中哪些正式记忆。"
+  },
+  status: {
+    title: "运行状态",
+    desc: "查看影响记忆调用和后台处理的关键配置。"
+  },
+  reserved: {
+    title: "预留扩展",
+    desc: "这里保留给后续新增的管理模块。"
+  }
+};
+
+const emptyMemoryFilters: MemoryFilters = {
+  ids: "",
+  user_id: "",
+  group_id: "",
+  date: "",
+  memory_type: ""
+};
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
-  if (!headers.has("Content-Type")) {
+  if (options?.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+
   const adminToken = readAdminToken();
   if (adminToken && !headers.has("X-Kaka-Admin-Token")) {
     headers.set("X-Kaka-Admin-Token", adminToken);
   }
-  const response = await fetch(`/admin/api${path}`, {
-    ...options,
-    headers
-  });
+
+  const response = await fetch(`/admin/api${path}`, { ...options, headers });
   if (!response.ok) {
     let message = response.statusText;
     try {
@@ -177,12 +175,13 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     }
     throw new Error(message);
   }
+
   return response.json() as Promise<T>;
 }
 
 function readAdminToken(): string {
   try {
-    return localStorage.getItem(adminTokenStorageKey)?.trim() ?? "";
+    return sessionStorage.getItem(adminTokenStorageKey)?.trim() ?? "";
   } catch {
     return "";
   }
@@ -192,17 +191,29 @@ function writeAdminToken(value: string): void {
   try {
     const token = value.trim();
     if (token) {
-      localStorage.setItem(adminTokenStorageKey, token);
+      sessionStorage.setItem(adminTokenStorageKey, token);
     } else {
-      localStorage.removeItem(adminTokenStorageKey);
+      sessionStorage.removeItem(adminTokenStorageKey);
     }
   } catch {
-    // localStorage may be unavailable in restricted browsers; the next request will simply omit the token.
+    return;
   }
 }
 
-function joinIds(values: Set<number>): string {
-  return Array.from(values).join(", ");
+function readThemeMode(): ThemeMode {
+  try {
+    return localStorage.getItem(themeStorageKey) === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+function writeThemeMode(value: ThemeMode): void {
+  try {
+    localStorage.setItem(themeStorageKey, value);
+  } catch {
+    return;
+  }
 }
 
 function buildQuery(params: Record<string, string | number | null | undefined>): string {
@@ -216,36 +227,60 @@ function buildQuery(params: Record<string, string | number | null | undefined>):
   return query.toString();
 }
 
-function describeSelection(values: number[]): string {
-  return values.length > 8 ? `${values.slice(0, 8).join(", ")} 等 ${values.length} 条` : values.join(", ");
+function formatUser(user?: UserInfo | null): string {
+  if (!user) return "-";
+  return `${user.display_name || user.platform_user_id}（${user.platform_user_id}）`;
 }
 
-function confirmWrite(message: string): boolean {
-  return window.confirm(message);
+function formatScene(scene?: SceneInfo | null): string {
+  if (!scene) return "-";
+  return `${scene.scene_type_label || scene.scene_type} / ${scene.scene_id}`;
+}
+
+function formatConfidence(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(2) : "-";
+}
+
+function statusLabel(value: string): string {
+  const labels: Record<string, string> = {
+    active: "使用中",
+    archived: "已归档",
+    all: "全部"
+  };
+  return labels[value] ?? value;
+}
+
+function statusClass(value: string): string {
+  if (value === "active") return "green";
+  if (value === "archived") return "gray";
+  return "blue";
+}
+
+function settingText(value: string | number | boolean | null | undefined, fallback = "-"): string {
+  if (typeof value === "boolean") return value ? "开启" : "关闭";
+  if (value === null || value === undefined || value === "") return fallback;
+  return String(value);
+}
+
+function memoryTypeLabel(value: string): string {
+  const found = memoryTypeOptions.find((item) => item.value === value);
+  return found?.label ?? value;
+}
+
+function describeSelection(values: number[]): string {
+  if (values.length > 8) {
+    return `${values.slice(0, 8).join("、")} 等 ${values.length} 条`;
+  }
+  return values.join("、");
 }
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [inputs, setInputs] = useState<InputPreview[]>([]);
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [inputStatus, setInputStatusFilter] = useState("not_analyzed");
-  const [candidateStatus, setCandidateStatus] = useState("pending");
-  const [memoryStatus, setMemoryStatusFilter] = useState("active");
-  const [adminToken, setAdminToken] = useState(readAdminToken);
-  const [conversationFilters, setConversationFilters] = useState<ListFilters>(emptyListFilters);
-  const [inputFilters, setInputFilters] = useState<ListFilters>(emptyListFilters);
-  const [candidateFilters, setCandidateFilters] = useState<ListFilters>(emptyListFilters);
-  const [memoryFilters, setMemoryFilters] = useState<ListFilters>(emptyListFilters);
-  const [selectedInputs, setSelectedInputs] = useState<Set<number>>(new Set());
-  const [selectedCandidates, setSelectedCandidates] = useState<Set<number>>(new Set());
+  const [memoryStatus, setMemoryStatus] = useState<MemoryStatusFilter>("active");
+  const [memoryFilters, setMemoryFilters] = useState<MemoryFilters>(emptyMemoryFilters);
   const [selectedMemories, setSelectedMemories] = useState<Set<number>>(new Set());
-  const [notice, setNotice] = useState("管理台已加载");
-  const [noticeKind, setNoticeKind] = useState<NoticeKind>("info");
-  const [error, setError] = useState("");
   const [searchForm, setSearchForm] = useState<SearchForm>({
     user_id: "",
     group_id: "",
@@ -253,20 +288,54 @@ export function App() {
     private: false,
     min_score: 1
   });
+  const [adminToken, setAdminToken] = useState(readAdminToken);
+  const [notice, setNotice] = useState("正在加载管理平台");
+  const [noticeKind, setNoticeKind] = useState<"info" | "success">("info");
+  const [error, setError] = useState("");
+  const [busyLabel, setBusyLabel] = useState("");
+  const [activePage, setActivePage] = useState<PageKey>("overview");
+  const [themeMode, setThemeMode] = useState<ThemeMode>(readThemeMode);
 
-  async function run(label: string, task: () => Promise<string | void>) {
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode;
+    writeThemeMode(themeMode);
+  }, [themeMode]);
+
+  useEffect(() => {
+    void run("刷新页面", refreshAll, { quietSuccess: true });
+  }, []);
+
+  const counts = summary?.counts ?? {};
+  const settings = summary?.settings ?? {};
+  const selectedMemoryIds = useMemo(() => Array.from(selectedMemories), [selectedMemories]);
+  const allVisibleSelected = memories.length > 0 && memories.every((memory) => selectedMemories.has(memory.id));
+  const isBusy = Boolean(busyLabel);
+  const currentPage = pageCopy[activePage];
+
+  async function run(
+    label: string,
+    task: () => Promise<string | void>,
+    options: { quietSuccess?: boolean } = {}
+  ) {
+    setBusyLabel(label);
     setError("");
     setNoticeKind("info");
     setNotice(`${label}...`);
     try {
       const message = await task();
       setNoticeKind("success");
-      setNotice(message || `${label}完成`);
+      setNotice(options.quietSuccess ? "数据已更新" : message || `${label}完成`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setNoticeKind("info");
       setNotice(`${label}失败`);
+    } finally {
+      setBusyLabel("");
     }
+  }
+
+  async function refreshAll() {
+    await Promise.all([refreshSummary(), refreshMemories(memoryStatus, memoryFilters)]);
   }
 
   async function refreshSummary() {
@@ -274,59 +343,11 @@ export function App() {
     setSummary(data);
   }
 
-  async function refreshConversations() {
-    const query = buildQuery({ limit: 50, ...conversationFilters });
-    const data = await api<{ items: Conversation[] }>(`/conversations?${query}`);
-    setConversations(data.items);
-  }
-
-  async function refreshInputs(status = inputStatus, filters = inputFilters) {
-    const query = buildQuery({ limit: 50, status, ...filters });
-    const data = await api<{ items: InputPreview[] }>(`/inputs/analysis-preview?${query}`);
-    setInputs(data.items);
-    setSelectedInputs(new Set());
-  }
-
-  async function refreshCandidates(status = candidateStatus, filters = candidateFilters) {
-    const query = buildQuery({ limit: 50, status, ...filters });
-    const data = await api<{ items: Candidate[] }>(`/candidates?${query}`);
-    setCandidates(data.items);
-    setSelectedCandidates(new Set());
-  }
-
   async function refreshMemories(status = memoryStatus, filters = memoryFilters) {
-    const query = buildQuery({ limit: 50, status, ...filters });
+    const query = buildQuery({ limit: 80, status, ...filters });
     const data = await api<{ items: Memory[] }>(`/memories?${query}`);
     setMemories(data.items);
     setSelectedMemories(new Set());
-  }
-
-  async function refreshAll() {
-    await Promise.all([
-      refreshSummary(),
-      refreshConversations(),
-      refreshInputs(),
-      refreshCandidates(),
-      refreshMemories()
-    ]);
-  }
-
-  useEffect(() => {
-    void run("刷新数据", refreshAll);
-  }, []);
-
-  const selectedCandidateIds = useMemo(() => Array.from(selectedCandidates), [selectedCandidates]);
-  const selectedInputIds = useMemo(() => Array.from(selectedInputs), [selectedInputs]);
-  const selectedMemoryIds = useMemo(() => Array.from(selectedMemories), [selectedMemories]);
-
-  function toggleSelection(setter: (value: Set<number>) => void, values: Set<number>, id: number) {
-    const next = new Set(values);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      next.add(id);
-    }
-    setter(next);
   }
 
   function updateAdminToken(value: string) {
@@ -334,858 +355,586 @@ export function App() {
     writeAdminToken(value);
   }
 
-  async function markSelectedInputsSkipped() {
-    if (!selectedInputIds.length) return;
-    if (!confirmWrite(`确认将输入 ID ${describeSelection(selectedInputIds)} 标记为 skipped？`)) return;
-    await run("标记 skipped", async () => {
-      const result = await api<{ updated: number; skipped: number }>("/inputs/mark-skipped", {
-        method: "POST",
-        body: JSON.stringify({ ids: selectedInputIds })
-      });
-      await refreshInputs(inputStatus);
-      await refreshSummary();
-      return `标记完成：更新 ${result.updated} 条，跳过 ${result.skipped} 条`;
-    });
+  function changeThemeMode() {
+    setThemeMode((value) => (value === "light" ? "dark" : "light"));
   }
 
-  async function updateInputStatus(status: "not_analyzed" | "analyzed" | "skipped") {
-    if (!selectedInputIds.length) return;
-    if (!confirmWrite(`确认将输入 ID ${describeSelection(selectedInputIds)} 改为 ${status}？`)) return;
-    await run("调整输入状态", async () => {
-      const result = await api<{ updated: number; matched: number; status: string }>("/inputs/status", {
-        method: "POST",
-        body: JSON.stringify({ ids: selectedInputIds, status })
-      });
-      await refreshInputs(inputStatus);
-      await refreshSummary();
-      return `输入状态已改为 ${result.status}：匹配 ${result.matched} 条，更新 ${result.updated} 条`;
-    });
+  function changeMemoryStatus(value: MemoryStatusFilter) {
+    setMemoryStatus(value);
+    void run("刷新记忆", () => refreshMemories(value, memoryFilters), { quietSuccess: true });
   }
 
-  async function previewCandidateMerge() {
-    if (!selectedCandidateIds.length) return;
-    await run("合并预览", async () => {
-      const result = await api<{ plan: Record<string, number>; candidate_count: number }>("/candidates/merge", {
-        method: "POST",
-        body: JSON.stringify({ ids: selectedCandidateIds, apply: false })
-      });
-      return `预览 ${result.candidate_count} 条：insert=${result.plan.insert ?? 0}, duplicate=${result.plan.duplicate ?? 0}, skip=${result.plan.skip ?? 0}`;
-    });
+  function applyFilters() {
+    void run("刷新记忆", () => refreshMemories(memoryStatus, memoryFilters), { quietSuccess: true });
   }
 
-  async function applyCandidateMerge() {
-    if (!selectedCandidateIds.length) return;
-    if (!confirmWrite(`确认将候选 ID ${describeSelection(selectedCandidateIds)} 写入正式记忆？`)) return;
-    await run("合并候选", async () => {
-      const result = await api<{ stats: Record<string, number> }>("/candidates/merge", {
-        method: "POST",
-        body: JSON.stringify({ ids: selectedCandidateIds, apply: true })
-      });
-      await refreshCandidates(candidateStatus);
-      await refreshMemories(memoryStatus);
-      await refreshSummary();
-      return `合并完成：新增 ${result.stats.inserted ?? 0} 条，重复 ${result.stats.duplicates ?? 0} 条，跳过 ${result.stats.skipped ?? 0} 条`;
-    });
+  function clearFilters() {
+    setMemoryFilters(emptyMemoryFilters);
+    void run("刷新记忆", () => refreshMemories(memoryStatus, emptyMemoryFilters), { quietSuccess: true });
   }
 
-  async function updateCandidateStatus(status: "pending" | "approved" | "rejected" | "merged_duplicate") {
-    if (!selectedCandidateIds.length) return;
-    if (!confirmWrite(`确认将候选 ID ${describeSelection(selectedCandidateIds)} 改为 ${status}？`)) return;
-    await run("调整候选状态", async () => {
-      const result = await api<{ updated: number; matched: number; status: string }>("/candidates/status", {
-        method: "POST",
-        body: JSON.stringify({ ids: selectedCandidateIds, status })
-      });
-      await refreshCandidates(candidateStatus);
-      await refreshSummary();
-      return `候选状态已改为 ${result.status}：匹配 ${result.matched} 条，更新 ${result.updated} 条`;
-    });
+  function toggleSelection(id: number) {
+    const next = new Set(selectedMemories);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedMemories(next);
+  }
+
+  function toggleAllVisible() {
+    const next = new Set(selectedMemories);
+    if (allVisibleSelected) {
+      memories.forEach((memory) => next.delete(memory.id));
+    } else {
+      memories.forEach((memory) => next.add(memory.id));
+    }
+    setSelectedMemories(next);
   }
 
   async function updateMemoryStatus(status: "active" | "archived") {
-    if (!selectedMemoryIds.length) return;
-    const verb = status === "active" ? "恢复" : "归档";
-    if (!confirmWrite(`确认${verb}记忆 ID ${describeSelection(selectedMemoryIds)}？`)) return;
-    await run(`${verb}记忆`, async () => {
+    if (!selectedMemories.size) return;
+    const action = status === "active" ? "恢复" : "归档";
+    const ids = Array.from(selectedMemories);
+    if (!window.confirm(`确认${action}记忆编号 ${describeSelection(ids)}？`)) return;
+
+    await run(`${action}记忆`, async () => {
       const result = await api<{ updated: number; matched: number }>("/memories/status", {
         method: "POST",
-        body: JSON.stringify({ ids: selectedMemoryIds, status })
+        body: JSON.stringify({ ids, status })
       });
-      await refreshMemories(memoryStatus);
-      await refreshSummary();
-      return `${verb}完成：匹配 ${result.matched} 条，更新 ${result.updated} 条`;
+      await Promise.all([refreshMemories(memoryStatus, memoryFilters), refreshSummary()]);
+      return `匹配 ${result.matched} 条，更新 ${result.updated} 条`;
     });
   }
 
   async function deleteSelectedMemories() {
-    if (!selectedMemoryIds.length) return;
-    if (!confirmWrite(`确认永久删除记忆 ID ${describeSelection(selectedMemoryIds)}？此操作不可撤销。`)) return;
+    if (!selectedMemories.size) return;
+    const ids = Array.from(selectedMemories);
+    if (!window.confirm(`确认永久删除记忆编号 ${describeSelection(ids)}？此操作不可撤销。`)) return;
+
     await run("删除记忆", async () => {
       const result = await api<{ deleted: number }>("/memories/delete", {
         method: "POST",
-        body: JSON.stringify({ ids: selectedMemoryIds, confirm: true })
+        body: JSON.stringify({ ids, confirm: true })
       });
-      await refreshMemories(memoryStatus);
-      await refreshSummary();
-      return `删除完成：${result.deleted} 条`;
+      await Promise.all([refreshMemories(memoryStatus, memoryFilters), refreshSummary()]);
+      return `删除 ${result.deleted} 条`;
     });
   }
 
-  const activeLabel = tabs.find((tab) => tab.id === activeTab)?.label ?? "管理台";
+  async function searchMemories() {
+    await run("检索记忆", async () => {
+      const data = await api<{ items: SearchResult[] }>("/memories/search", {
+        method: "POST",
+        body: JSON.stringify(searchForm)
+      });
+      setSearchResults(data.items);
+      return `命中 ${data.items.length} 条`;
+    });
+  }
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">K</div>
+          <div className="brand-mark">卡</div>
           <div>
-            <strong>卡卡管理台</strong>
-            <span>Local Admin Console</span>
+            <strong>卡咔</strong>
+            <span>记忆管理平台</span>
           </div>
         </div>
-        <nav className="nav-list" aria-label="管理台导航">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                className={activeTab === tab.id ? "nav-item active" : "nav-item"}
-                onClick={() => setActiveTab(tab.id)}
-                type="button"
-              >
-                <Icon size={18} />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+
+        <nav className="nav-list" aria-label="主导航">
+          <div className="nav-group">
+            {mainNavItems.map((item) => (
+              <NavButton
+                active={activePage === item.id}
+                icon={item.icon}
+                key={item.id}
+                label={item.label}
+                onClick={() => setActivePage(item.id)}
+              />
+            ))}
+          </div>
+          <div className="nav-reserved">
+            <span>后续模块</span>
+            <NavButton
+              active={activePage === reservedNavItem.id}
+              icon={reservedNavItem.icon}
+              label={reservedNavItem.label}
+              onClick={() => setActivePage(reservedNavItem.id)}
+            />
+          </div>
         </nav>
+
         <div className="sidebar-footer">
-          <ShieldCheck size={18} />
-          <span>本地管理入口，仅面向开发环境</span>
+          <button
+            aria-pressed={themeMode === "dark"}
+            className="theme-switch"
+            onClick={changeThemeMode}
+            type="button"
+          >
+            <span className="switch-track">
+              <span className="switch-thumb">{themeMode === "light" ? <Sun size={13} /> : <Moon size={13} />}</span>
+            </span>
+            <span>双色模式：{themeMode === "light" ? "浅色" : "深色"}</span>
+          </button>
+          <div className="sidebar-card">
+            <span>服务器时间</span>
+            <strong>{summary?.server_time ?? "未连接"}</strong>
+          </div>
         </div>
       </aside>
 
       <main className="main">
         <header className="topbar">
           <div>
-            <p className="eyebrow">KAKA V2 OPERATIONS</p>
-            <h1>{activeLabel}</h1>
+            <p className="eyebrow">卡咔管理平台</p>
+            <h1>{currentPage.title}</h1>
+            <p className="lead">{currentPage.desc}</p>
           </div>
-          <div className="status-strip">
-            <span>{summary?.server_time ?? "未连接"}</span>
+          <div className="status-strip" aria-label="管理状态">
+            <span className="time-chip">
+              <Clock3 size={15} />
+              {summary?.server_time ?? "未连接"}
+            </span>
             <label className="token-field">
-              <span>管理 Token</span>
+              <span>管理密钥</span>
               <input
                 autoComplete="off"
+                placeholder="需要时填写"
                 type="password"
                 value={adminToken}
                 onChange={(event) => updateAdminToken(event.target.value)}
               />
             </label>
-            <button className="icon-button" onClick={() => void run("刷新数据", refreshAll)} title="刷新" type="button">
-              <RotateCcw size={18} />
+            <button
+              className="icon-button"
+              disabled={isBusy}
+              onClick={() => void run("刷新页面", refreshAll, { quietSuccess: true })}
+              title="刷新页面"
+              type="button"
+            >
+              <RefreshCw size={18} />
             </button>
           </div>
         </header>
 
         {error ? <div className="alert error">{error}</div> : <div className={`alert ${noticeKind}`}>{notice}</div>}
 
-        {activeTab === "overview" && <Overview summary={summary} />}
-        {activeTab === "conversations" && (
-          <Conversations
-            rows={conversations}
-            filters={conversationFilters}
-            onFiltersChange={setConversationFilters}
-            onRefresh={() => void run("刷新对话", refreshConversations)}
-            onClearFilters={() => {
-              setConversationFilters(emptyListFilters);
-              void run("刷新对话", async () => {
-                const query = buildQuery({ limit: 50, ...emptyListFilters });
-                const data = await api<{ items: Conversation[] }>(`/conversations?${query}`);
-                setConversations(data.items);
-              });
-            }}
-          />
-        )}
-        {activeTab === "inputs" && (
-          <Inputs
-            rows={inputs}
-            selected={selectedInputs}
-            status={inputStatus}
-            filters={inputFilters}
-            onStatusChange={(status) => {
-              setInputStatusFilter(status);
-              void run("刷新输入", () => refreshInputs(status, inputFilters));
-            }}
-            onFiltersChange={setInputFilters}
-            onToggle={(id) => toggleSelection(setSelectedInputs, selectedInputs, id)}
-            onRefresh={() => void run("刷新输入", () => refreshInputs(inputStatus, inputFilters))}
-            onClearFilters={() => {
-              setInputFilters(emptyListFilters);
-              void run("刷新输入", () => refreshInputs(inputStatus, emptyListFilters));
-            }}
-            onMarkSkipped={() => void markSelectedInputsSkipped()}
-            onSetStatus={(status) => void updateInputStatus(status)}
-          />
-        )}
-        {activeTab === "candidates" && (
-          <Candidates
-            rows={candidates}
-            selected={selectedCandidates}
-            status={candidateStatus}
-            filters={candidateFilters}
-            onStatusChange={(status) => {
-              setCandidateStatus(status);
-              void run("刷新候选", () => refreshCandidates(status, candidateFilters));
-            }}
-            onFiltersChange={setCandidateFilters}
-            onRefresh={() => void run("刷新候选", () => refreshCandidates(candidateStatus, candidateFilters))}
-            onClearFilters={() => {
-              setCandidateFilters(emptyListFilters);
-              void run("刷新候选", () => refreshCandidates(candidateStatus, emptyListFilters));
-            }}
-            onToggle={(id) => toggleSelection(setSelectedCandidates, selectedCandidates, id)}
-            onPreview={() => void previewCandidateMerge()}
-            onApply={() => void applyCandidateMerge()}
-            onSetStatus={(status) => void updateCandidateStatus(status)}
-          />
-        )}
-        {activeTab === "memories" && (
-          <Memories
-            rows={memories}
-            selected={selectedMemories}
-            status={memoryStatus}
-            filters={memoryFilters}
-            onStatusChange={(status) => {
-              setMemoryStatusFilter(status);
-              void run("刷新记忆", () => refreshMemories(status, memoryFilters));
-            }}
-            onFiltersChange={setMemoryFilters}
-            onRefresh={() => void run("刷新记忆", () => refreshMemories(memoryStatus, memoryFilters))}
-            onClearFilters={() => {
-              setMemoryFilters(emptyListFilters);
-              void run("刷新记忆", () => refreshMemories(memoryStatus, emptyListFilters));
-            }}
-            onToggle={(id) => toggleSelection(setSelectedMemories, selectedMemories, id)}
-            onArchive={() => void updateMemoryStatus("archived")}
-            onRestore={() => void updateMemoryStatus("active")}
-            onDelete={() => void deleteSelectedMemories()}
-          />
-        )}
-        {activeTab === "search" && (
-          <SearchPanel
-            form={searchForm}
-            results={searchResults}
-            onChange={setSearchForm}
-            onSubmit={() =>
-              void run("检索记忆", async () => {
-                const data = await api<{ items: SearchResult[] }>("/memories/search", {
-                  method: "POST",
-                  body: JSON.stringify(searchForm)
-                });
-                setSearchResults(data.items);
-                return `检索完成：命中 ${data.items.length} 条`;
-              })
-            }
-          />
-        )}
-        {activeTab === "system" && <SystemPanel summary={summary} />}
+        <div className="page-frame" key={activePage}>
+          {activePage === "overview" && (
+            <OverviewPage
+              counts={counts}
+              settings={settings}
+              serverTime={summary?.server_time ?? "未连接"}
+              onOpenMemories={() => setActivePage("memories")}
+              onOpenSearch={() => setActivePage("search")}
+            />
+          )}
+          {activePage === "memories" && (
+            <MemoriesPage
+              allVisibleSelected={allVisibleSelected}
+              filters={memoryFilters}
+              isBusy={isBusy}
+              memories={memories}
+              memoryStatus={memoryStatus}
+              selectedMemories={selectedMemories}
+              selectedMemoryIds={selectedMemoryIds}
+              onApplyFilters={applyFilters}
+              onChangeFilters={setMemoryFilters}
+              onChangeStatus={changeMemoryStatus}
+              onClearFilters={clearFilters}
+              onDelete={() => void deleteSelectedMemories()}
+              onRefresh={() =>
+                void run("刷新记忆", () => refreshMemories(memoryStatus, memoryFilters), { quietSuccess: true })
+              }
+              onToggleAll={toggleAllVisible}
+              onToggleSelection={toggleSelection}
+              onUpdateStatus={(status) => void updateMemoryStatus(status)}
+            />
+          )}
+          {activePage === "search" && (
+            <SearchPage
+              disabled={isBusy}
+              form={searchForm}
+              results={searchResults}
+              onChange={setSearchForm}
+              onSubmit={() => void searchMemories()}
+            />
+          )}
+          {activePage === "status" && <StatusPage counts={counts} settings={settings} serverTime={summary?.server_time ?? "未连接"} />}
+          {activePage === "reserved" && <ReservedPage />}
+        </div>
       </main>
     </div>
   );
 }
 
-function Overview({ summary }: { summary: Summary | null }) {
-  const counts = summary?.counts ?? {};
+function NavButton({
+  active,
+  icon: Icon,
+  label,
+  onClick
+}: {
+  active: boolean;
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+}) {
   return (
-    <section className="content-grid">
-      <Metric title="未分析输入" value={counts.not_analyzed_inputs ?? 0} icon={Sparkles} />
-      <Metric title="Pending 候选" value={counts.pending_candidates ?? 0} icon={GitMerge} />
-      <Metric title="Active 记忆" value={counts.active_memories ?? 0} icon={Brain} />
-      <Metric title="归档记忆" value={counts.archived_memories ?? 0} icon={Archive} />
-      <Panel title="记忆状态" className="wide">
-        <StatusBars data={summary?.memory_statuses ?? {}} />
-      </Panel>
-      <Panel title="候选状态" className="wide">
-        <StatusBars data={summary?.candidate_statuses ?? {}} />
-      </Panel>
-      <Panel title="输入状态" className="wide">
-        <StatusBars data={summary?.input_statuses ?? {}} />
-      </Panel>
-      <Panel title="数据规模" className="wide">
-        <KeyValueGrid
-          data={{
-            users: counts.users ?? 0,
-            scenes: counts.scenes ?? 0,
-            inputs: counts.inputs ?? 0,
-            outputs: counts.outputs ?? 0,
-            memory_candidates: counts.memory_candidates ?? 0,
-            memories: counts.memories ?? 0
-          }}
-        />
-      </Panel>
-    </section>
+    <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick} type="button">
+      <Icon size={18} />
+      <span>{label}</span>
+    </button>
   );
 }
 
-function Metric({ title, value, icon: Icon }: { title: string; value: number; icon: typeof Brain }) {
+function OverviewPage({
+  counts,
+  settings,
+  serverTime,
+  onOpenMemories,
+  onOpenSearch
+}: {
+  counts: Record<string, number>;
+  settings: Summary["settings"];
+  serverTime: string;
+  onOpenMemories: () => void;
+  onOpenSearch: () => void;
+}) {
   return (
-    <div className="metric">
-      <Icon size={20} />
-      <span>{title}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
+    <div className="page-stack">
+      <section className="stats-grid" aria-label="正式记忆概览">
+        <Metric icon={Brain} title="使用中" value={counts.active_memories ?? 0} />
+        <Metric icon={Archive} title="已归档" value={counts.archived_memories ?? 0} />
+        <Metric icon={HardDrive} title="总记忆" value={counts.memories ?? 0} />
+        <Metric icon={ShieldCheck} title="回复注入" value={settingText(settings.memory_reply_injection_enabled)} />
+      </section>
 
-function Panel({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
-  return (
-    <section className={`panel ${className}`}>
-      <div className="panel-header">
-        <h2>{title}</h2>
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function StatusBars({ data }: { data: Record<string, number> }) {
-  const entries = Object.entries(data);
-  const total = entries.reduce((sum, [, value]) => sum + value, 0) || 1;
-  if (!entries.length) {
-    return <EmptyState message="暂无状态数据" />;
-  }
-  return (
-    <div className="status-bars">
-      {entries.map(([key, value]) => (
-        <div key={key} className="status-row">
-          <span>{key}</span>
-          <div className="bar">
-            <div style={{ width: `${Math.max(4, (value / total) * 100)}%` }} />
+      <section className="split-grid">
+        <Panel title="快捷操作" subtitle="进入常用管理页">
+          <div className="quick-actions">
+            <button onClick={onOpenMemories} type="button">
+              <Brain size={16} />
+              管理正式记忆
+            </button>
+            <button className="secondary" onClick={onOpenSearch} type="button">
+              <Search size={16} />
+              测试回复检索
+            </button>
           </div>
-          <strong>{value}</strong>
-        </div>
-      ))}
+        </Panel>
+        <Panel title="运行摘要" subtitle="当前系统读取到的状态">
+          <KeyValueGrid
+            data={{
+              服务器时间: serverTime,
+              回复注入: settingText(settings.memory_reply_injection_enabled),
+              注入条数: settingText(settings.memory_reply_limit, "0"),
+              最低分: settingText(settings.memory_reply_min_score, "0")
+            }}
+          />
+        </Panel>
+      </section>
     </div>
   );
 }
 
-function KeyValueGrid({ data }: { data: Record<string, number | string | boolean> }) {
-  return (
-    <div className="settings-grid compact">
-      {Object.entries(data).map(([key, value]) => (
-        <div key={key} className="setting-row">
-          <span>{key}</span>
-          <strong>{String(value)}</strong>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Conversations({
-  rows,
+function MemoriesPage({
+  allVisibleSelected,
   filters,
-  onFiltersChange,
-  onRefresh,
-  onClearFilters
-}: {
-  rows: Conversation[];
-  filters: ListFilters;
-  onFiltersChange: (filters: ListFilters) => void;
-  onRefresh: () => void;
-  onClearFilters: () => void;
-}) {
-  return (
-    <Panel title="最近 50 条输入">
-      <FilterBar
-        filters={filters}
-        fields={[
-          { key: "ids", label: "ID" },
-          { key: "group_id", label: "群号" },
-          { key: "user_id", label: "用户" },
-          { key: "date", label: "日期", type: "date" },
-          { key: "scene_type", label: "场景", options: sceneTypeOptions },
-          { key: "reply_state", label: "回复", options: replyStateOptions },
-          { key: "output_origin", label: "来源" },
-          { key: "output_reason", label: "原因" }
-        ]}
-        onChange={onFiltersChange}
-        onSubmit={onRefresh}
-        onClear={onClearFilters}
-      />
-      <Toolbar>
-        <button className="secondary" onClick={onRefresh} type="button">
-          刷新
-        </button>
-      </Toolbar>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>时间</th>
-              <th>用户</th>
-              <th>场景</th>
-              <th>回复</th>
-              <th>分析</th>
-              <th>内容</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td>{row.id}</td>
-                <td>{row.created_at}</td>
-                <td>{formatUser(row.user)}</td>
-                <td>{formatScene(row.scene)}</td>
-                <td>
-                  <Badge value={row.reply_state} />
-                </td>
-                <td>
-                  <Badge value={row.analysis_status} />
-                </td>
-                <td className="text-cell">
-                  {row.content_text}
-                  {row.output?.content_text ? <small>回复：{row.output.content_text}</small> : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!rows.length && <EmptyState message="暂无对话数据" />}
-      </div>
-    </Panel>
-  );
-}
-
-function Inputs({
-  rows,
-  selected,
-  status,
-  filters,
-  onStatusChange,
-  onFiltersChange,
-  onToggle,
-  onRefresh,
+  isBusy,
+  memories,
+  memoryStatus,
+  selectedMemories,
+  selectedMemoryIds,
+  onApplyFilters,
+  onChangeFilters,
+  onChangeStatus,
   onClearFilters,
-  onMarkSkipped,
-  onSetStatus
+  onDelete,
+  onRefresh,
+  onToggleAll,
+  onToggleSelection,
+  onUpdateStatus
 }: {
-  rows: InputPreview[];
-  selected: Set<number>;
-  status: string;
-  filters: ListFilters;
-  onStatusChange: (status: string) => void;
-  onFiltersChange: (filters: ListFilters) => void;
-  onToggle: (id: number) => void;
-  onRefresh: () => void;
+  allVisibleSelected: boolean;
+  filters: MemoryFilters;
+  isBusy: boolean;
+  memories: Memory[];
+  memoryStatus: MemoryStatusFilter;
+  selectedMemories: Set<number>;
+  selectedMemoryIds: number[];
+  onApplyFilters: () => void;
+  onChangeFilters: (filters: MemoryFilters) => void;
+  onChangeStatus: (value: MemoryStatusFilter) => void;
   onClearFilters: () => void;
-  onMarkSkipped: () => void;
-  onSetStatus: (status: "not_analyzed" | "analyzed" | "skipped") => void;
-}) {
-  return (
-    <Panel title="未分析输入规则预览">
-      <FilterBar
-        filters={filters}
-        fields={[
-          { key: "ids", label: "ID" },
-          { key: "group_id", label: "群号" },
-          { key: "user_id", label: "用户" },
-          { key: "date", label: "日期", type: "date" },
-          { key: "scene_type", label: "场景", options: sceneTypeOptions }
-        ]}
-        onChange={onFiltersChange}
-        onSubmit={onRefresh}
-        onClear={onClearFilters}
-      />
-      <Toolbar>
-        <select value={status} onChange={(event) => onStatusChange(event.target.value)} aria-label="输入状态">
-          {inputStatusOptions.map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
-        </select>
-        <SelectionText values={selected} />
-        <button className="secondary" onClick={onRefresh} type="button">
-          刷新
-        </button>
-        <button className="danger" disabled={!selected.size} onClick={onMarkSkipped} type="button">
-          按规则标记 skipped
-        </button>
-        <button className="secondary" disabled={!selected.size} onClick={() => onSetStatus("skipped")} type="button">
-          设为 skipped
-        </button>
-        <button className="secondary" disabled={!selected.size} onClick={() => onSetStatus("analyzed")} type="button">
-          设为 analyzed
-        </button>
-        <button className="secondary" disabled={!selected.size} onClick={() => onSetStatus("not_analyzed")} type="button">
-          设为 not_analyzed
-        </button>
-      </Toolbar>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th></th>
-              <th>ID</th>
-              <th>用户</th>
-              <th>场景</th>
-              <th>规则结果</th>
-              <th>内容</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td>
-                  <input type="checkbox" checked={selected.has(row.id)} onChange={() => onToggle(row.id)} />
-                </td>
-                <td>{row.id}</td>
-                <td>{formatUser(row.user)}</td>
-                <td>{formatScene(row.scene)}</td>
-                <td>
-                  <Badge value={row.analysis_label ?? row.analysis_status} />
-                </td>
-                <td className="text-cell">
-                  {row.content_text}
-                  <small>{row.analysis_reason || "暂无规则说明"}</small>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!rows.length && <EmptyState message="暂无未分析输入" />}
-      </div>
-    </Panel>
-  );
-}
-
-function Candidates(props: {
-  rows: Candidate[];
-  selected: Set<number>;
-  status: string;
-  filters: ListFilters;
-  onStatusChange: (status: string) => void;
-  onFiltersChange: (filters: ListFilters) => void;
-  onRefresh: () => void;
-  onClearFilters: () => void;
-  onToggle: (id: number) => void;
-  onPreview: () => void;
-  onApply: () => void;
-  onSetStatus: (status: "pending" | "approved" | "rejected" | "merged_duplicate") => void;
-}) {
-  const canMerge = props.status === "pending";
-  return (
-    <Panel title="记忆候选区">
-      <FilterBar
-        filters={props.filters}
-        fields={[
-          { key: "ids", label: "ID" },
-          { key: "group_id", label: "群号" },
-          { key: "user_id", label: "用户" },
-          { key: "date", label: "日期", type: "date" },
-          { key: "scene_type", label: "场景", options: sceneTypeOptions },
-          { key: "memory_type", label: "类型" }
-        ]}
-        onChange={props.onFiltersChange}
-        onSubmit={props.onRefresh}
-        onClear={props.onClearFilters}
-      />
-      <Toolbar>
-        <select value={props.status} onChange={(event) => props.onStatusChange(event.target.value)} aria-label="候选状态">
-          {candidateStatusOptions.map((status) => (
-            <option key={status} value={status}>
-              {status}
-            </option>
-          ))}
-        </select>
-        <SelectionText values={props.selected} />
-        {canMerge && (
-          <>
-            <button className="secondary" disabled={!props.selected.size} onClick={props.onPreview} type="button">
-              合并预览
-            </button>
-            <button disabled={!props.selected.size} onClick={props.onApply} type="button">
-              写入 memories
-            </button>
-          </>
-        )}
-        <button className="secondary" disabled={!props.selected.size} onClick={() => props.onSetStatus("pending")} type="button">
-          设为 pending
-        </button>
-        <button className="secondary" disabled={!props.selected.size} onClick={() => props.onSetStatus("approved")} type="button">
-          设为 approved
-        </button>
-        <button className="danger" disabled={!props.selected.size} onClick={() => props.onSetStatus("rejected")} type="button">
-          设为 rejected
-        </button>
-        <button className="secondary" disabled={!props.selected.size} onClick={() => props.onSetStatus("merged_duplicate")} type="button">
-          设为 duplicate
-        </button>
-      </Toolbar>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th></th>
-              <th>ID</th>
-              <th>用户</th>
-              <th>场景</th>
-              <th>类型</th>
-              <th>状态</th>
-              <th>候选记忆</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.rows.map((row) => (
-              <tr key={row.id}>
-                <td>
-                  <input type="checkbox" checked={props.selected.has(row.id)} onChange={() => props.onToggle(row.id)} />
-                </td>
-                <td>{row.id}</td>
-                <td>{formatUser(row.user)}</td>
-                <td>{formatScene(row.scene)}</td>
-                <td>{row.memory_type}</td>
-                <td>
-                  <Badge value={row.status} />
-                </td>
-                <td className="text-cell">
-                  {row.candidate_memory}
-                  <small>
-                    {row.reason} / confidence {formatConfidence(row.confidence)}
-                  </small>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!props.rows.length && <EmptyState message="当前筛选下没有候选记忆" />}
-      </div>
-    </Panel>
-  );
-}
-
-function Memories(props: {
-  rows: Memory[];
-  selected: Set<number>;
-  status: string;
-  filters: ListFilters;
-  onStatusChange: (status: string) => void;
-  onFiltersChange: (filters: ListFilters) => void;
-  onRefresh: () => void;
-  onClearFilters: () => void;
-  onToggle: (id: number) => void;
-  onArchive: () => void;
-  onRestore: () => void;
   onDelete: () => void;
+  onRefresh: () => void;
+  onToggleAll: () => void;
+  onToggleSelection: (id: number) => void;
+  onUpdateStatus: (status: "active" | "archived") => void;
 }) {
   return (
-    <Panel title="正式长期记忆">
-      <FilterBar
-        filters={props.filters}
-        fields={[
-          { key: "ids", label: "ID" },
-          { key: "group_id", label: "群号" },
-          { key: "user_id", label: "用户" },
-          { key: "date", label: "日期", type: "date" },
-          { key: "scene_type", label: "场景", options: sceneTypeOptions },
-          { key: "memory_type", label: "类型" }
-        ]}
-        onChange={props.onFiltersChange}
-        onSubmit={props.onRefresh}
-        onClear={props.onClearFilters}
-      />
-      <Toolbar>
-        <select value={props.status} onChange={(event) => props.onStatusChange(event.target.value)} aria-label="记忆状态">
-          {memoryStatusOptions.map((status) => (
-            <option key={status} value={status}>
-              {status}
-            </option>
-          ))}
-        </select>
-        <SelectionText values={props.selected} />
-        <button className="secondary" disabled={!props.selected.size} onClick={props.onArchive} type="button">
-          <Archive size={16} />
-          归档
-        </button>
-        <button className="secondary" disabled={!props.selected.size} onClick={props.onRestore} type="button">
-          <CheckCircle2 size={16} />
-          恢复
-        </button>
-        <button className="danger" disabled={!props.selected.size} onClick={props.onDelete} type="button">
-          <Trash2 size={16} />
-          删除
-        </button>
-      </Toolbar>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th></th>
-              <th>ID</th>
-              <th>用户</th>
-              <th>场景</th>
-              <th>类型</th>
-              <th>状态</th>
-              <th>记忆</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.rows.map((row) => (
-              <tr key={row.id}>
-                <td>
-                  <input type="checkbox" checked={props.selected.has(row.id)} onChange={() => props.onToggle(row.id)} />
-                </td>
-                <td>{row.id}</td>
-                <td>{formatUser(row.user)}</td>
-                <td>{formatScene(row.scene)}</td>
-                <td>{row.memory_type}</td>
-                <td>
-                  <Badge value={row.status} />
-                </td>
-                <td className="text-cell">
-                  {row.memory_text}
-                  <small>
-                    {row.updated_at} / confidence {formatConfidence(row.confidence)}
-                  </small>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!props.rows.length && <EmptyState message="当前筛选下没有正式记忆" />}
+    <section className="panel memory-panel">
+      <div className="panel-header">
+        <div>
+          <h2>正式记忆</h2>
+          <span>当前显示 {memories.length} 条，已选 {selectedMemories.size} 条</span>
+        </div>
       </div>
-    </Panel>
+
+      <div className="control-bar">
+        <label className="compact-field">
+          <span>状态</span>
+          <select value={memoryStatus} onChange={(event) => onChangeStatus(event.target.value as MemoryStatusFilter)}>
+            {memoryStatusOptions.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <SelectionText ids={selectedMemoryIds} />
+        <div className="toolbar-actions">
+          <button className="secondary" disabled={isBusy} onClick={onRefresh} type="button">
+            <RefreshCw size={16} />
+            刷新
+          </button>
+          <button className="secondary" disabled={isBusy || !selectedMemories.size} onClick={() => onUpdateStatus("archived")} type="button">
+            <Archive size={16} />
+            归档
+          </button>
+          <button className="secondary" disabled={isBusy || !selectedMemories.size} onClick={() => onUpdateStatus("active")} type="button">
+            <CheckCircle2 size={16} />
+            恢复
+          </button>
+          <button className="danger" disabled={isBusy || !selectedMemories.size} onClick={onDelete} type="button">
+            <Trash2 size={16} />
+            硬删除
+          </button>
+        </div>
+      </div>
+
+      <FilterBar filters={filters} onChange={onChangeFilters} onClear={onClearFilters} onSubmit={onApplyFilters} />
+
+      <DataTable empty="当前筛选下没有正式记忆" isEmpty={!memories.length}>
+        <thead>
+          <tr>
+            <th className="check-col">
+              <input checked={allVisibleSelected} disabled={!memories.length} type="checkbox" onChange={onToggleAll} />
+            </th>
+            <th className="id-col">编号</th>
+            <th className="status-col">状态</th>
+            <th className="actor-col">用户 / 场景</th>
+            <th className="type-col">类型</th>
+            <th>记忆内容</th>
+            <th className="time-col">更新时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          {memories.map((memory) => (
+            <tr key={memory.id}>
+              <td className="check-col">
+                <input
+                  checked={selectedMemories.has(memory.id)}
+                  type="checkbox"
+                  onChange={() => onToggleSelection(memory.id)}
+                />
+              </td>
+              <td className="id-col">#{memory.id}</td>
+              <td className="status-col">
+                <Badge value={memory.status} />
+              </td>
+              <td className="actor-col">
+                <strong>{formatUser(memory.user)}</strong>
+                <small>{formatScene(memory.scene)}</small>
+              </td>
+              <td className="type-col">{memoryTypeLabel(memory.memory_type || "-")}</td>
+              <td className="memory-text">
+                <p>{memory.memory_text}</p>
+                <small>置信度 {formatConfidence(memory.confidence)}</small>
+              </td>
+              <td className="time-col">{memory.updated_at || memory.created_at || "-"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </DataTable>
+    </section>
   );
 }
 
-function SearchPanel({
+function SearchPage({
   form,
   results,
+  disabled,
   onChange,
   onSubmit
 }: {
   form: SearchForm;
   results: SearchResult[];
+  disabled: boolean;
   onChange: (value: SearchForm) => void;
   onSubmit: () => void;
 }) {
   return (
-    <Panel title="回复前记忆检索预览">
-      <div className="form-grid">
-        <label>
-          QQ 用户号
-          <input value={form.user_id} onChange={(event) => onChange({ ...form, user_id: event.target.value })} />
-        </label>
-        <label>
-          群号
-          <input value={form.group_id} onChange={(event) => onChange({ ...form, group_id: event.target.value })} />
-        </label>
-        <label>
-          最低分
-          <input
-            type="number"
-            min="0"
-            step="0.1"
-            value={form.min_score}
-            onChange={(event) => onChange({ ...form, min_score: Number(event.target.value) })}
-          />
-        </label>
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            checked={form.private}
-            onChange={(event) => onChange({ ...form, private: event.target.checked })}
-          />
-          私聊场景
-        </label>
-        <label className="full">
-          当前消息
-          <textarea value={form.text} onChange={(event) => onChange({ ...form, text: event.target.value })} />
-        </label>
+    <section className="panel">
+      <div className="panel-header">
+        <div>
+          <h2>回复检索</h2>
+          <span>输入用户号和当前消息，预览会参与回复的记忆。</span>
+        </div>
       </div>
-      <Toolbar>
-        <button disabled={!form.user_id || !form.text} onClick={onSubmit} type="button">
-          开始检索
-        </button>
-      </Toolbar>
-      <div className="result-list">
-        {results.map((item) => (
-          <article key={item.memory.id} className="result-item">
-            <div>
-              <strong>
-                #{item.memory.id} / {item.memory.memory_type}
-              </strong>
-              <Badge value={`score ${item.score}`} />
-            </div>
-            <p>{item.memory.memory_text}</p>
-            <small>{item.reasons.join(" / ") || item.matched_terms.join(" / ") || "暂无命中说明"}</small>
-          </article>
-        ))}
-        {!results.length && <EmptyState message="填写用户号和当前消息后可预览检索结果" />}
+      <div className="search-preview">
+        <div className="form-grid">
+          <label>
+            <span>用户号</span>
+            <input value={form.user_id} onChange={(event) => onChange({ ...form, user_id: event.target.value })} />
+          </label>
+          <label>
+            <span>群号</span>
+            <input value={form.group_id} onChange={(event) => onChange({ ...form, group_id: event.target.value })} />
+          </label>
+          <label>
+            <span>最低分</span>
+            <input
+              min="0"
+              step="0.1"
+              type="number"
+              value={form.min_score}
+              onChange={(event) => onChange({ ...form, min_score: Number(event.target.value) })}
+            />
+          </label>
+          <label className="checkbox-label">
+            <input
+              checked={form.private}
+              type="checkbox"
+              onChange={(event) => onChange({ ...form, private: event.target.checked })}
+            />
+            <span>私聊场景</span>
+          </label>
+          <label className="full">
+            <span>当前消息</span>
+            <textarea value={form.text} onChange={(event) => onChange({ ...form, text: event.target.value })} />
+          </label>
+        </div>
+        <div className="preview-actions">
+          <button disabled={disabled || !form.user_id || !form.text} onClick={onSubmit} type="button">
+            <Search size={16} />
+            开始检索
+          </button>
+        </div>
+        <div className="result-list">
+          {results.map((item) => (
+            <article className="result-item" key={item.memory.id}>
+              <div className="result-head">
+                <strong>
+                  #{item.memory.id} / {memoryTypeLabel(item.memory.memory_type || "-")}
+                </strong>
+                <span className="score-badge">分数 {item.score.toFixed(1)}</span>
+              </div>
+              <p>{item.memory.memory_text}</p>
+              <small>{item.reasons.join(" / ") || item.matched_terms.join(" / ") || "暂无命中说明"}</small>
+            </article>
+          ))}
+          {!results.length && <EmptyState message="暂无检索结果" />}
+        </div>
       </div>
-    </Panel>
+    </section>
   );
 }
 
-function SystemPanel({ summary }: { summary: Summary | null }) {
+function StatusPage({
+  counts,
+  settings,
+  serverTime
+}: {
+  counts: Record<string, number>;
+  settings: Summary["settings"];
+  serverTime: string;
+}) {
   return (
-    <Panel title="运行配置">
-      <KeyValueGrid data={summary?.settings ?? {}} />
-    </Panel>
+    <div className="page-stack">
+      <section className="stats-grid">
+        <Metric icon={Brain} title="正式记忆" value={counts.memories ?? 0} />
+        <Metric icon={Archive} title="已归档" value={counts.archived_memories ?? 0} />
+        <Metric icon={ShieldCheck} title="自动分析" value={settingText(settings.memory_auto_analysis_enabled)} />
+        <Metric icon={CheckCircle2} title="自动审核" value={settingText(settings.memory_auto_review_enabled)} />
+      </section>
+      <Panel title="配置详情" subtitle="当前管理端读取到的关键配置">
+        <KeyValueGrid
+          data={{
+            服务器时间: serverTime,
+            回复注入: settingText(settings.memory_reply_injection_enabled),
+            注入条数: settingText(settings.memory_reply_limit, "0"),
+            最低分: settingText(settings.memory_reply_min_score, "0"),
+            自动分析: settingText(settings.memory_auto_analysis_enabled),
+            自动审核: settingText(settings.memory_auto_review_enabled),
+            本地管理: settingText(settings.admin_local_only),
+            远程模型: settingText(settings.llm_enabled)
+          }}
+        />
+      </Panel>
+    </div>
   );
 }
 
-type FilterField = {
-  key: keyof ListFilters;
-  label: string;
-  type?: "date";
-  options?: { value: string; label: string }[];
-};
+function ReservedPage() {
+  return (
+    <section className="reserved-page">
+      <div className="reserved-symbol">
+        <Wrench size={26} />
+      </div>
+      <h2>预留扩展</h2>
+      <p>后续需要增加新的管理能力时，可以从这里接入，不影响当前正式记忆管理流程。</p>
+    </section>
+  );
+}
 
 function FilterBar({
   filters,
-  fields,
   onChange,
   onSubmit,
   onClear
 }: {
-  filters: ListFilters;
-  fields: FilterField[];
-  onChange: (filters: ListFilters) => void;
+  filters: MemoryFilters;
+  onChange: (filters: MemoryFilters) => void;
   onSubmit: () => void;
   onClear: () => void;
 }) {
   return (
     <div className="filter-grid">
-      {fields.map((field) => (
-        <label key={field.key}>
-          {field.label}
-          {field.options ? (
-            <select
-              value={filters[field.key]}
-              onChange={(event) => onChange({ ...filters, [field.key]: event.target.value })}
-            >
-              {field.options.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type={field.type ?? "text"}
-              value={filters[field.key]}
-              onChange={(event) => onChange({ ...filters, [field.key]: event.target.value })}
-            />
-          )}
-        </label>
-      ))}
+      <label>
+        <span>编号</span>
+        <input placeholder="例如：1,2,3" value={filters.ids} onChange={(event) => onChange({ ...filters, ids: event.target.value })} />
+      </label>
+      <label>
+        <span>用户号</span>
+        <input value={filters.user_id} onChange={(event) => onChange({ ...filters, user_id: event.target.value })} />
+      </label>
+      <label>
+        <span>群号</span>
+        <input value={filters.group_id} onChange={(event) => onChange({ ...filters, group_id: event.target.value })} />
+      </label>
+      <label>
+        <span>日期</span>
+        <input type="date" value={filters.date} onChange={(event) => onChange({ ...filters, date: event.target.value })} />
+      </label>
+      <label>
+        <span>类型</span>
+        <select value={filters.memory_type} onChange={(event) => onChange({ ...filters, memory_type: event.target.value })}>
+          {memoryTypeOptions.map((item) => (
+            <option key={item.value || "all"} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </label>
       <div className="filter-actions">
         <button onClick={onSubmit} type="button">
-          应用
+          应用筛选
         </button>
         <button className="secondary" onClick={onClear} type="button">
           清空
@@ -1195,12 +944,54 @@ function FilterBar({
   );
 }
 
-function Toolbar({ children }: { children: React.ReactNode }) {
-  return <div className="toolbar">{children}</div>;
+function Metric({ title, value, icon: Icon }: { title: string; value: string | number; icon: LucideIcon }) {
+  return (
+    <div className="metric">
+      <Icon size={20} />
+      <span>{title}</span>
+      <strong>{value}</strong>
+    </div>
+  );
 }
 
-function SelectionText({ values }: { values: Set<number> }) {
-  return <span className="selection-text">已选 {values.size}{values.size ? `：${joinIds(values)}` : ""}</span>;
+function Panel({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <div>
+          <h2>{title}</h2>
+          <span>{subtitle}</span>
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function DataTable({ children, empty, isEmpty }: { children: ReactNode; empty: string; isEmpty: boolean }) {
+  return (
+    <div className="table-wrap">
+      <table>{children}</table>
+      {isEmpty && <EmptyState message={empty} />}
+    </div>
+  );
+}
+
+function KeyValueGrid({ data }: { data: Record<string, string | number> }) {
+  return (
+    <div className="settings-grid">
+      {Object.entries(data).map(([key, value]) => (
+        <div className="setting-row" key={key}>
+          <span>{key}</span>
+          <strong>{value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SelectionText({ ids }: { ids: number[] }) {
+  return <span className="selection-text">{ids.length ? `已选 ${describeSelection(ids)}` : "未选择记忆"}</span>;
 }
 
 function EmptyState({ message }: { message: string }) {
@@ -1208,32 +999,5 @@ function EmptyState({ message }: { message: string }) {
 }
 
 function Badge({ value }: { value: string }) {
-  return <span className={`badge ${badgeClass(value)}`}>{value}</span>;
-}
-
-function badgeClass(value: string) {
-  if (value.includes("active") || value.includes("approved") || value.includes("replied") || value.includes("candidate")) {
-    return "green";
-  }
-  if (value.includes("pending") || value.includes("not_analyzed") || value.includes("score")) {
-    return "blue";
-  }
-  if (value.includes("reject") || value.includes("delete") || value.includes("skipped") || value.includes("archived")) {
-    return "red";
-  }
-  return "gray";
-}
-
-function formatUser(user?: UserInfo | null) {
-  if (!user) return "-";
-  return `${user.display_name} (${user.platform_user_id})`;
-}
-
-function formatScene(scene?: SceneInfo | null) {
-  if (!scene) return "-";
-  return `${scene.scene_type_label || scene.scene_type} / ${scene.scene_id}`;
-}
-
-function formatConfidence(value: number) {
-  return Number.isFinite(value) ? value.toFixed(2) : "-";
+  return <span className={`badge ${statusClass(value)}`}>{statusLabel(value)}</span>;
 }

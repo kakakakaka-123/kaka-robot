@@ -1,6 +1,7 @@
 import sqlite3
 
 from sqlalchemy import inspect
+from sqlalchemy.orm import sessionmaker
 
 from kaka_core.storage.database import (
     EXPECTED_INPUT_COLUMNS,
@@ -10,6 +11,7 @@ from kaka_core.storage.database import (
     create_database_engine,
     init_database,
 )
+from kaka_core.storage.repository import try_acquire_event_processing_lock
 
 
 def test_init_database_migrates_legacy_messages_and_responses(tmp_path) -> None:
@@ -71,6 +73,7 @@ def test_init_database_migrates_legacy_messages_and_responses(tmp_path) -> None:
     inspector = inspect(engine)
     assert "inputs" in inspector.get_table_names()
     assert "outputs" in inspector.get_table_names()
+    assert "event_processing_locks" in inspector.get_table_names()
     assert "memory_candidates" in inspector.get_table_names()
     assert "memories" in inspector.get_table_names()
     assert "messages" not in inspector.get_table_names()
@@ -123,3 +126,17 @@ def test_init_database_migrates_legacy_messages_and_responses(tmp_path) -> None:
         "merge_reason",
     }.issubset(memory_columns)
     assert [column["name"] for column in inspector.get_columns("memories")] == EXPECTED_MEMORY_COLUMNS
+
+
+def test_event_processing_lock_is_single_owner(tmp_path) -> None:
+    db_path = tmp_path / "lock.sqlite3"
+    engine = create_database_engine(f"sqlite:///{db_path}")
+    init_database(engine)
+
+    session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    with session_factory() as session:
+        first_owner = try_acquire_event_processing_lock(session, "event-1", lease_seconds=60)
+        second_owner = try_acquire_event_processing_lock(session, "event-1", lease_seconds=60)
+
+    assert first_owner is not None
+    assert second_owner is None

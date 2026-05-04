@@ -31,8 +31,8 @@ def create_app() -> FastAPI:
     """
 
     app = FastAPI(
-        title="Kaka Core",
-        description="卡咔 v2 的核心大脑 API。",
+        title="卡咔核心",
+        description="卡咔 的核心大脑 API。",
         version="0.1.0",
         lifespan=lifespan,
     )

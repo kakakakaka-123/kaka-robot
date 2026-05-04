@@ -1,7 +1,7 @@
 [project]
 name = "kaka-protocol"
 version = "0.1.0"
-description = "Unified message protocol models for Kaka v2."
+description = "Unified message protocol models for 卡咔."
 requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2.7,<3",

@@ -72,7 +72,7 @@ GROUP_ITEMS = [
     SeedItem("u2", "group", 6, "我不喜欢太花哨的界面。"),
     SeedItem("u1", "group", 8, "以后回答时请尽量用第三人称，不要总说我。"),
     SeedItem("u2", "group", 10, "以后群里别 @ 我太多次。"),
-    SeedItem("u1", "group", 12, "我最近在做卡咔 v2 的长期记忆测试。"),
+    SeedItem("u1", "group", 12, "我最近在做卡咔 的长期记忆测试。"),
     SeedItem("u2", "group", 14, "我最近在学 Python。"),
     SeedItem("u1", "group", 16, "这个项目里正式记忆和候选区要分开。"),
     SeedItem("u2", "group", 18, "他是我导师王老师。"),
