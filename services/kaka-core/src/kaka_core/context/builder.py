@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from kaka_core.config.settings import MemoryReplySettings, ShortContextSettings
+from kaka_core.config.settings import MemoryReplySettings, RelationshipSettings, ShortContextSettings
 from kaka_core.context.recent import ShortContextItem, format_short_context, load_short_context
 from kaka_core.llm.client import ChatMessage
 from kaka_core.memory.search import MemorySearchFilters, MemorySearchResult, search_user_memories
+from kaka_core.relationship.context import RelationshipContext, load_relationship_context
 from kaka_core.storage.database import create_session_factory, init_database
 from kaka_protocol import MessageEvent
 
@@ -34,12 +35,14 @@ class ReplyContext:
     metadata: dict[str, object]
     memories: tuple[MemorySearchResult, ...] = ()
     short_context: tuple[ShortContextItem, ...] = ()
+    relationship: RelationshipContext | None = None
 
 
 def build_reply_context(
     event: MessageEvent,
     memory_settings: MemoryReplySettings,
     short_context_settings: ShortContextSettings,
+    relationship_settings: RelationshipSettings,
 ) -> ReplyContext:
     """组装聊天模型输入。
 
@@ -54,9 +57,13 @@ def build_reply_context(
         user_text,
         short_context_settings,
     )
+    relationship_context, relationship_metadata = load_relationship_context_safely(
+        event,
+        relationship_settings,
+    )
 
     speaker_name = event.display_name or event.user_id
-    system_prompt = build_system_prompt(memory_results, speaker_name)
+    system_prompt = build_system_prompt(memory_results, speaker_name, relationship_context)
     user_prompt = build_user_prompt(event, user_text, short_context_items)
     metadata: dict[str, object] = {
         "memory_injection_enabled": memory_settings.enabled,
@@ -65,6 +72,7 @@ def build_reply_context(
     }
     metadata.update(memory_metadata)
     metadata.update(short_context_metadata)
+    metadata.update(relationship_metadata)
 
     return ReplyContext(
         messages=(
@@ -74,6 +82,7 @@ def build_reply_context(
         metadata=metadata,
         memories=tuple(memory_results),
         short_context=tuple(short_context_items),
+        relationship=relationship_context,
     )
 
 
@@ -147,16 +156,54 @@ def load_short_context_safely(
         }
 
 
-def build_system_prompt(memory_results: list[MemorySearchResult], speaker_name: str) -> str:
-    if not memory_results:
-        return SYSTEM_PROMPT
+def load_relationship_context_safely(
+    event: MessageEvent,
+    relationship_settings: RelationshipSettings,
+) -> tuple[RelationshipContext | None, dict[str, object]]:
+    """读取当前说话者关系上下文。
 
-    lines = [
-        SYSTEM_PROMPT.rstrip(),
-        "",
-        f"可参考的长期记忆（均描述当前说话用户：{speaker_name}，不是卡咔自己）：",
-        "说明：记忆正文中的“我 / 我的 / 本人”默认指当前说话用户，不指卡咔。",
-    ]
+    关系上下文失败不能影响聊天主流程，因此这里会把异常降级到 metadata。
+    """
+
+    try:
+        init_database()
+        session_factory = create_session_factory()
+        with session_factory() as session:
+            relationship = load_relationship_context(session, event, relationship_settings)
+    except Exception as exc:  # noqa: BLE001
+        return None, {
+            "relationship_level": "unknown",
+            "relationship_error": str(exc),
+        }
+
+    return relationship, {
+        "relationship_level": relationship.level,
+        "relationship_is_owner": relationship.is_owner,
+        "relationship_input_count": relationship.input_count,
+        "relationship_recent_input_count": relationship.recent_input_count,
+        "relationship_active_memory_count": relationship.active_memory_count,
+        "relationship_recent_days": relationship.recent_days,
+    }
+
+
+def build_system_prompt(
+    memory_results: list[MemorySearchResult],
+    speaker_name: str,
+    relationship: RelationshipContext | None,
+) -> str:
+    lines = [SYSTEM_PROMPT.rstrip()]
+    if relationship is not None:
+        lines.extend(build_relationship_prompt_lines(relationship, speaker_name))
+    if not memory_results:
+        return "\n".join(lines) + "\n"
+
+    lines.extend(
+        [
+            "",
+            f"可参考的长期记忆（均描述当前说话用户：{speaker_name}，不是卡咔自己）：",
+            "说明：记忆正文中的“我 / 我的 / 本人”默认指当前说话用户，不指卡咔。",
+        ]
+    )
     for index, result in enumerate(memory_results, start=1):
         lines.append(f"{index}. 当前说话用户：{result.memory.memory_text}")
     lines.extend(
@@ -171,6 +218,58 @@ def build_system_prompt(memory_results: list[MemorySearchResult], speaker_name: 
         ]
     )
     return "\n".join(lines)
+
+
+def build_relationship_prompt_lines(
+    relationship: RelationshipContext,
+    speaker_name: str,
+) -> list[str]:
+    label_map = {
+        "owner": "主人 / 最亲近的维护者",
+        "familiar": "熟人",
+        "regular": "普通熟悉群友",
+        "stranger": "陌生人或新近出现的人",
+    }
+    lines = [
+        "",
+        f"当前说话者关系：{label_map.get(relationship.level, relationship.level)}（{speaker_name}）。",
+        (
+            "关系信号："
+            f"历史输入 {relationship.input_count} 条，"
+            f"最近 {relationship.recent_days} 天输入 {relationship.recent_input_count} 条，"
+            f"active 正式记忆 {relationship.active_memory_count} 条。"
+        ),
+        "关系使用规则：",
+    ]
+    if relationship.level == "owner":
+        lines.extend(
+            [
+                "- 这是卡咔最亲近的平等朋友和维护者，不要把对方当陌生人。",
+                "- 可以更自然、更信任，但不要表现成主仆关系。",
+            ]
+        )
+    elif relationship.level == "familiar":
+        lines.extend(
+            [
+                "- 对方和卡咔已有较多互动，可以稍微自然一点。",
+                "- 可以参考过往互动，但不要突然过度亲密。",
+            ]
+        )
+    elif relationship.level == "regular":
+        lines.extend(
+            [
+                "- 对方和卡咔有一些互动，保持自然礼貌即可。",
+                "- 不要装作特别熟，也不要过度疏远。",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "- 对方目前仍按陌生人或新人处理。",
+                "- 保持礼貌和边界感，不要套近乎或主动表现得很亲密。",
+            ]
+        )
+    return lines
 
 
 def build_user_prompt(

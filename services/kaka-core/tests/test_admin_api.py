@@ -22,6 +22,7 @@ def create_test_client(monkeypatch, tmp_path, *, local_only: str = "true", token
     monkeypatch.setenv("MEMORY_AUTO_REVIEW_ENABLED", "false")
     monkeypatch.setenv("LLM_ENABLED", "false")
     monkeypatch.setenv("ADMIN_LOCAL_ONLY", local_only)
+    monkeypatch.setenv("KAKA_OWNER_USER_IDS", "")
     if token:
         monkeypatch.setenv("ADMIN_API_TOKEN", token)
     else:
@@ -216,6 +217,9 @@ def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path)
     assert data["metadata"]["short_context_enabled"] is True
     assert data["metadata"]["short_context_count"] == 1
     assert data["metadata"]["short_context_input_ids"] == [1]
+    assert data["metadata"]["relationship_level"] == "stranger"
+    assert data["metadata"]["relationship_input_count"] == 1
+    assert "当前说话者关系" in data["messages"][0]["content"]
 
 
 def test_admin_memories_are_ordered_by_id(monkeypatch, tmp_path):

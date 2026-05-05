@@ -517,7 +517,12 @@ def preview_reply_context(
         private=private,
         display_name=display_name,
     )
-    reply_context = build_reply_context(event, settings.memory_reply, settings.short_context)
+    reply_context = build_reply_context(
+        event,
+        settings.memory_reply,
+        settings.short_context,
+        settings.relationship,
+    )
     messages = [
         {
             "role": message.role,

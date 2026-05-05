@@ -213,6 +213,7 @@ async def generate_chat_response(
                 event,
                 settings.memory_reply,
                 settings.short_context,
+                settings.relationship,
             )
 
             try:

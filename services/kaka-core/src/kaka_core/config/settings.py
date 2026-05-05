@@ -42,6 +42,14 @@ def _get_int(name: str, default: int) -> int:
     return int(value)
 
 
+def _get_csv_set(name: str) -> frozenset[str]:
+    value = os.getenv(name)
+    if value is None:
+        return frozenset()
+    items = [item.strip() for item in value.split(",")]
+    return frozenset(item for item in items if item)
+
+
 @dataclass(frozen=True)
 class DatabaseSettings:
     """数据库配置。
@@ -118,6 +126,20 @@ class ShortContextSettings:
 
 
 @dataclass(frozen=True)
+class RelationshipSettings:
+    """回复时关系上下文配置。"""
+
+    owner_user_ids: frozenset[str]
+    familiar_input_count: int
+    familiar_recent_input_count: int
+    familiar_active_memory_count: int
+    regular_input_count: int
+    regular_recent_input_count: int
+    regular_active_memory_count: int
+    recent_days: int
+
+
+@dataclass(frozen=True)
 class AdminSettings:
     """本地管理台访问保护配置。"""
 
@@ -135,6 +157,7 @@ class Settings:
     memory_review: MemoryReviewSettings
     memory_reply: MemoryReplySettings
     short_context: ShortContextSettings
+    relationship: RelationshipSettings
     admin: AdminSettings
 
 
@@ -186,9 +209,19 @@ def get_settings() -> Settings:
         ),
         short_context=ShortContextSettings(
             enabled=_get_bool("SHORT_CONTEXT_ENABLED", True),
-            limit=_get_int("SHORT_CONTEXT_LIMIT", 8),
+            limit=_get_int("SHORT_CONTEXT_LIMIT", 20),
             max_chars=_get_int("SHORT_CONTEXT_MAX_CHARS", 1200),
             window_minutes=_get_int("SHORT_CONTEXT_WINDOW_MINUTES", 30),
+        ),
+        relationship=RelationshipSettings(
+            owner_user_ids=_get_csv_set("KAKA_OWNER_USER_IDS"),
+            familiar_input_count=_get_int("RELATIONSHIP_FAMILIAR_INPUT_COUNT", 100),
+            familiar_recent_input_count=_get_int("RELATIONSHIP_FAMILIAR_RECENT_INPUT_COUNT", 30),
+            familiar_active_memory_count=_get_int("RELATIONSHIP_FAMILIAR_ACTIVE_MEMORY_COUNT", 8),
+            regular_input_count=_get_int("RELATIONSHIP_REGULAR_INPUT_COUNT", 30),
+            regular_recent_input_count=_get_int("RELATIONSHIP_REGULAR_RECENT_INPUT_COUNT", 10),
+            regular_active_memory_count=_get_int("RELATIONSHIP_REGULAR_ACTIVE_MEMORY_COUNT", 3),
+            recent_days=_get_int("RELATIONSHIP_RECENT_DAYS", 7),
         ),
         admin=AdminSettings(
             local_only=_get_bool("ADMIN_LOCAL_ONLY", True),

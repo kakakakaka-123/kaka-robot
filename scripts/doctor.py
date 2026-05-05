@@ -12,7 +12,7 @@ PyCharm 右键运行即可，不需要配置 Parameters。
 - `.env` / `.env.example` / `.gitignore`。
 - LLM、数据库和 qq-adapter 的配置字段形状。
 - SQLite 表结构、废弃字段、字段顺序、记忆候选表和正式记忆表。
-- 自动候选区复核配置和回复时长期记忆注入配置。
+- 自动候选区复核配置、回复时长期记忆注入配置和关系上下文配置。
 - 本地 Web 管理台访问保护配置。
 - 项目内关键模块是否能导入。
 - 8001 / 8081 / 8000 端口状态。
@@ -293,6 +293,42 @@ def check_env_file(results: list[CheckResult]) -> dict[str, str]:
         results,
         "MEMORY_REPLY_POOL_SIZE",
         values.get("MEMORY_REPLY_POOL_SIZE", "300"),
+    )
+    owner_ids = values.get("KAKA_OWNER_USER_IDS", "").strip()
+    if owner_ids:
+        ok(results, "KAKA_OWNER_USER_IDS", "已设置，值已隐藏")
+    else:
+        warn(results, "KAKA_OWNER_USER_IDS", "未设置；主人关系会按普通用户判断")
+    check_int_value(results, "RELATIONSHIP_RECENT_DAYS", values.get("RELATIONSHIP_RECENT_DAYS", "7"))
+    check_int_value(
+        results,
+        "RELATIONSHIP_FAMILIAR_INPUT_COUNT",
+        values.get("RELATIONSHIP_FAMILIAR_INPUT_COUNT", "100"),
+    )
+    check_int_value(
+        results,
+        "RELATIONSHIP_FAMILIAR_RECENT_INPUT_COUNT",
+        values.get("RELATIONSHIP_FAMILIAR_RECENT_INPUT_COUNT", "30"),
+    )
+    check_int_value(
+        results,
+        "RELATIONSHIP_FAMILIAR_ACTIVE_MEMORY_COUNT",
+        values.get("RELATIONSHIP_FAMILIAR_ACTIVE_MEMORY_COUNT", "8"),
+    )
+    check_int_value(
+        results,
+        "RELATIONSHIP_REGULAR_INPUT_COUNT",
+        values.get("RELATIONSHIP_REGULAR_INPUT_COUNT", "30"),
+    )
+    check_int_value(
+        results,
+        "RELATIONSHIP_REGULAR_RECENT_INPUT_COUNT",
+        values.get("RELATIONSHIP_REGULAR_RECENT_INPUT_COUNT", "10"),
+    )
+    check_int_value(
+        results,
+        "RELATIONSHIP_REGULAR_ACTIVE_MEMORY_COUNT",
+        values.get("RELATIONSHIP_REGULAR_ACTIVE_MEMORY_COUNT", "3"),
     )
     admin_local_only = values.get("ADMIN_LOCAL_ONLY", "true")
     check_bool_value(results, "ADMIN_LOCAL_ONLY", admin_local_only)
@@ -600,6 +636,7 @@ def check_imports(results: list[CheckResult]) -> None:
     modules = [
         ("kaka_protocol", "kaka-protocol"),
         ("kaka_core.config.settings", "kaka-core"),
+        ("kaka_core.relationship.context", "kaka-core relationship"),
         ("qq_adapter.config", "qq-adapter"),
         ("fastapi", "FastAPI"),
         ("httpx", "httpx"),

@@ -122,6 +122,26 @@ async def test_generate_chat_response_can_disable_memory_injection(monkeypatch, 
 
 
 @pytest.mark.anyio
+async def test_generate_chat_response_injects_owner_relationship(monkeypatch, tmp_path) -> None:
+    database_url = f"sqlite:///{tmp_path / 'owner-relationship-test.sqlite3'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("LLM_ENABLED", "true")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("KAKA_OWNER_USER_IDS", "10001")
+    get_settings.cache_clear()
+
+    router = FakeRouter()
+    response = await generate_chat_response(make_event(), router=router)
+
+    assert "当前说话者关系：主人 / 最亲近的维护者" in router.messages[0].content
+    assert "不要把对方当陌生人" in router.messages[0].content
+    assert response.metadata["relationship_level"] == "owner"
+    assert response.metadata["relationship_is_owner"] is True
+    assert response.metadata["relationship_input_count"] == 0
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
 async def test_generate_chat_response_records_conversation(monkeypatch, tmp_path) -> None:
     database_url = f"sqlite:///{tmp_path / 'kaka-test.sqlite3'}"
     monkeypatch.setenv("DATABASE_URL", database_url)
@@ -316,7 +336,7 @@ async def test_generate_chat_response_injects_short_context(monkeypatch, tmp_pat
     monkeypatch.setenv("LLM_ENABLED", "true")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
     monkeypatch.setenv("SHORT_CONTEXT_ENABLED", "true")
-    monkeypatch.setenv("SHORT_CONTEXT_LIMIT", "8")
+    monkeypatch.setenv("SHORT_CONTEXT_LIMIT", "20")
     monkeypatch.setenv("SHORT_CONTEXT_MAX_CHARS", "1200")
     monkeypatch.setenv("SHORT_CONTEXT_WINDOW_MINUTES", "30")
     get_settings.cache_clear()
@@ -327,16 +347,16 @@ async def test_generate_chat_response_injects_short_context(monkeypatch, tmp_pat
     user_prompt = router.messages[1].content
 
     assert "近期对话" in user_prompt
-    assert "群友A：同场景消息 1" not in user_prompt
     assert "群友A：过期消息" not in user_prompt
+    assert "群友A：同场景消息 1" in user_prompt
     assert "群友A：同场景消息 2" in user_prompt
     assert "群友A：同场景消息 9" in user_prompt
     assert "卡咔：回复 9" in user_prompt
     assert "其他场景消息" not in user_prompt
     assert "当前用户消息：你好" in user_prompt
     assert response.metadata["short_context_enabled"] is True
-    assert response.metadata["short_context_count"] == 8
-    assert response.metadata["short_context_input_ids"] == list(range(2, 10))
+    assert response.metadata["short_context_count"] == 9
+    assert response.metadata["short_context_input_ids"] == list(range(1, 10))
     assert response.metadata["short_context_window_minutes"] == 30
     get_settings.cache_clear()
 

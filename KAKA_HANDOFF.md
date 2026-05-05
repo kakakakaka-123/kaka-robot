@@ -79,7 +79,8 @@ D:\Python\AgentRobot\kaka-v2
 - 正式记忆页按 `memories.id` 稳定升序显示，支持每页 50 条分页、`active / archived / all` 切换、新增、编辑、归档、恢复和确认后的硬删除；危险写库动作都有确认弹窗。
 - 手动新增正式记忆会写入 `source="manual"`，默认 `merge_reason="手动新增"`；编辑会同步更新 `memory_text / normalized_text / memory_type / confidence / source_text / status / merge_reason`，也可调整用户和群/私聊场景。
 - 回复检索页会同时请求正式记忆检索和回复上下文预览，展示 System Prompt、User Prompt、metadata、`used_memory_ids` 和命中数量，方便确认真实回复前会给模型什么上下文。
-- 已接入第一版短期上下文：回复前从同场景最近输入和输出中读取上下文，默认只看最近 30 分钟，最多 8 条输入记录、总计 1200 字，排除当前消息；metadata 会记录 `short_context_enabled / short_context_count / short_context_input_ids`。
+- 已接入第一版短期上下文：回复前从同场景最近输入和输出中读取上下文，默认只看最近 30 分钟，最多 20 条输入记录、总计 1200 字，排除当前消息；metadata 会记录 `short_context_enabled / short_context_count / short_context_input_ids`。
+- 已接入第一版关系上下文：通过 `KAKA_OWNER_USER_IDS`、历史输入数、最近 7 天输入数和 active 正式记忆数，把当前说话者粗分为 `owner / familiar / regular / stranger`；阈值为 familiar：历史输入 >=100 或最近 7 天 >=30 或 active 记忆 >=8，regular：历史输入 >=30 或最近 7 天 >=10 或 active 记忆 >=3；metadata 会记录 `relationship_level / relationship_is_owner / relationship_input_count / relationship_recent_input_count / relationship_active_memory_count`。这不是好感度系统，不维护亲密分数。
 - 脚本现在定位为开发、测试、排查和应急备用入口；用户日常管理优先使用网页。
 - 已经创建根目录 `.env`，其中有 DeepSeek API Key。`.env` 被 `.gitignore` 忽略，不要把 Key 写进任何文档或回复。
 
@@ -137,7 +138,8 @@ QQ 发一句话
 -> qq-adapter 收到
 -> 转成 MessageEvent
 -> kaka-core 回复前检索少量 active 长期记忆并组装 prompt，或只观察记录
--> kaka-core 回复前读取同场景最近 30 分钟内最多 8 条短期上下文
+-> kaka-core 回复前读取同场景最近 30 分钟内最多 20 条短期上下文
+-> kaka-core 回复前注入粗略关系上下文，区分主人、熟人、普通熟悉群友和陌生人
 -> 返回 KakaResponse
 -> qq-adapter 发回 QQ 文本或不回复
 -> SQLite 记录消息，触发回复时记录输出
@@ -834,7 +836,8 @@ AIoT 交互例子：
 62. 回复检索页新增回复上下文预览：`POST /admin/api/reply-context/preview` 复用真实回复上下文组装器，前端展示 System Prompt、User Prompt、metadata 和命中记忆 ID，便于调试回复时实际注入的长期记忆。
 63. 正式记忆管理补齐“增”和“改”：新增 `POST /admin/api/memories` 和 `PATCH /admin/api/memories/{memory_id}`，Web 正式记忆页支持手动新增和单条编辑；归档、恢复和硬删除逻辑保留。
 64. 创建 `开发日志/2026-05-05.md`，同步正式记忆分页、回复上下文预览、正式记忆新增/编辑、测试结果和当前下一步建议。
-65. 新增第一版短期上下文：`SHORT_CONTEXT_ENABLED=true` 默认开启，`SHORT_CONTEXT_LIMIT=8`，`SHORT_CONTEXT_MAX_CHARS=1200`，`SHORT_CONTEXT_WINDOW_MINUTES=30`；回复上下文组装器会把同场景最近输入和卡咔回复压入 User Prompt，metadata 记录命中的 input id。
+65. 新增第一版短期上下文：`SHORT_CONTEXT_ENABLED=true` 默认开启，`SHORT_CONTEXT_LIMIT=20`，`SHORT_CONTEXT_MAX_CHARS=1200`，`SHORT_CONTEXT_WINDOW_MINUTES=30`；回复上下文组装器会把同场景最近输入和卡咔回复压入 User Prompt，metadata 记录命中的 input id。
+66. 新增第一版关系上下文：`KAKA_OWNER_USER_IDS` 配置主人 QQ 号，`kaka_core.relationship.context` 用现有 `users / inputs / memories` 推断 `owner / familiar / regular / stranger`，并接入 `kaka_core.context.builder` 的 System Prompt 和 metadata；当前只做熟悉度粗分，不做复杂好感度机制。
 
 2026-05-04 本轮检查验证结果：
 
@@ -869,9 +872,9 @@ git diff --check：passed
 2. 检查左侧导航的总览、正式记忆、回复检索、运行状态和预留扩展是否正常。
 3. 在正式记忆页复查分页、新增、编辑、归档、恢复和确认后硬删除。
 4. 再启动 `qq-adapter` 保持真实 QQ 对话运行，观察自动候选分析和自动候选区复核是否稳定。
-5. 用响应 metadata 或数据库输出记录回查 `used_memory_ids`、`short_context_count` 和 `short_context_input_ids`。
+5. 用响应 metadata 或数据库输出记录回查 `used_memory_ids`、`short_context_count`、`short_context_input_ids` 和 `relationship_level`。
 6. 偶尔查看 `memories`，不合适的记忆优先在 `/admin` 归档，确认错误、垃圾或敏感再硬删除；确需手动补记或修正时直接用正式记忆页的新增/编辑。
-7. 真实测试短期上下文是否自然接住最近 30 分钟内的对话；如果回复过度提起旧事，再调低 `MEMORY_REPLY_LIMIT` 或提高 `MEMORY_REPLY_MIN_SCORE`；如果容易被最近闲聊带偏，再调小 `SHORT_CONTEXT_LIMIT` 或关闭 `SHORT_CONTEXT_ENABLED`。
+7. 真实测试短期上下文是否自然接住最近 30 分钟内的对话，以及关系上下文是否让主人/熟人/新人边界更自然；如果回复过度提起旧事，再调低 `MEMORY_REPLY_LIMIT` 或提高 `MEMORY_REPLY_MIN_SCORE`；如果容易被最近闲聊带偏，再调小 `SHORT_CONTEXT_LIMIT` 或关闭 `SHORT_CONTEXT_ENABLED`。
 
 下一步成功标准：
 
@@ -891,12 +894,13 @@ QQ 发一句话
 -> manage_memories.py 能把不合适的正式记忆归档或删除
 -> /admin 能完成总览查看、正式记忆分页/新增/编辑/归档/恢复/硬删除、回复检索预览和运行状态检查
 -> 回复 metadata 能看到 `short_context_count` 和 `short_context_input_ids`
+-> 回复 metadata 能看到 `relationship_level`、`relationship_is_owner` 和关系计数
 -> 重复 QQ 事件不会重复调用 LLM 或重置分析状态
 -> 一条 input 可以产生多条不同 memory_candidates
 -> doctor.py 没有 FAIL
 ```
 
-注意：不要直接跳到关系网、情绪系统、多模态或复杂主动行为。当前长期记忆和短期上下文都已接入回复，下一阶段先保持 `inputs -> memory_candidates -> memories -> 回复前检索 + 短期上下文` 小而稳、可回查、可管理。
+注意：不要直接跳到关系网、好感度分数、情绪系统、多模态或复杂主动行为。当前长期记忆、短期上下文和第一版关系上下文都已接入回复，下一阶段先保持 `inputs -> memory_candidates -> memories -> 回复前检索 + 短期上下文 + 关系上下文` 小而稳、可回查、可管理。
 
 ## 13. 明天新对话框的实际启动建议
 
