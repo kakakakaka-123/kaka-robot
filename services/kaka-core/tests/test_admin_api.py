@@ -225,6 +225,19 @@ def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path)
     assert data["metadata"]["persona_prompt_source"] == "file"
     assert data["metadata"]["persona_prompt_path"] == str(persona_path)
     assert data["metadata"]["persona_prompt_fallback_used"] is False
+    assert data["metadata"]["context_layer_names"] == [
+        "persona",
+        "relationship",
+        "memory",
+        "recent_context",
+        "current_message",
+    ]
+    assert [layer["name"] for layer in data["layers"]] == data["metadata"]["context_layer_names"]
+    assert data["layers"][0]["title"] == "基础人设"
+    assert data["layers"][1]["title"] == "关系上下文"
+    assert data["layers"][2]["title"] == "长期记忆"
+    assert data["layers"][3]["title"] == "短期上下文"
+    assert data["layers"][4]["title"] == "当前消息"
     assert data["metadata"]["relationship_input_count"] == 1
     assert "当前说话者关系" in data["messages"][0]["content"]
 

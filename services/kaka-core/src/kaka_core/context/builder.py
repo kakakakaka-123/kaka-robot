@@ -18,15 +18,29 @@ from kaka_protocol import MessageEvent
 
 
 @dataclass(frozen=True)
+class ReplyContextLayer:
+    """回复上下文的一层。
+
+    `name` 是稳定机器名，`role` 决定最终进入 system 还是 user 消息。
+    """
+
+    name: str
+    title: str
+    role: str
+    content: str
+
+
+@dataclass(frozen=True)
 class ReplyContext:
     """一次回复前组装好的模型上下文。
 
-    后续情绪、关系、短期上下文、人设扩展都应该接到这里，而不是散落在
-    chat service 里。
+    动态上下文统一拆成 layer，再合并成真正发给模型的 messages。
+    后续情绪、用户画像、工具结果等新增上下文，也应该先成为独立 layer。
     """
 
     messages: tuple[ChatMessage, ...]
     metadata: dict[str, object]
+    layers: tuple[ReplyContextLayer, ...]
     memories: tuple[MemorySearchResult, ...] = ()
     short_context: tuple[ShortContextItem, ...] = ()
     relationship: RelationshipContext | None = None
@@ -42,8 +56,8 @@ def build_reply_context(
 ) -> ReplyContext:
     """组装聊天模型输入。
 
-    当前包含基础人设、长期记忆、短期上下文和当前消息；后续可以继续添加
-    emotion_context、relationship_context 等部分。
+    当前分层为 persona、relationship、memory、recent_context 和 current_message。
+    这样后续添加 emotion、user_profile 等层时，不需要把逻辑塞进聊天服务。
     """
 
     user_text = event.content.text or ""
@@ -60,14 +74,19 @@ def build_reply_context(
     )
 
     speaker_name = event.display_name or event.user_id
-    system_prompt = build_system_prompt(
+    layers = build_reply_context_layers(
         persona_prompt,
         memory_results,
+        short_context_items,
+        event,
+        user_text,
         speaker_name,
         relationship_context,
     )
-    user_prompt = build_user_prompt(event, user_text, short_context_items)
+    messages = build_messages_from_layers(layers)
     metadata: dict[str, object] = {
+        "context_layer_names": [layer.name for layer in layers],
+        "context_layer_count": len(layers),
         "persona_prompt_source": persona_prompt.source,
         "persona_prompt_path": persona_prompt.path,
         "persona_prompt_fallback_used": persona_prompt.fallback_used,
@@ -82,11 +101,9 @@ def build_reply_context(
     metadata.update(relationship_metadata)
 
     return ReplyContext(
-        messages=(
-            ChatMessage(role="system", content=system_prompt),
-            ChatMessage(role="user", content=user_prompt),
-        ),
+        messages=messages,
         metadata=metadata,
+        layers=tuple(layers),
         memories=tuple(memory_results),
         short_context=tuple(short_context_items),
         relationship=relationship_context,
@@ -194,25 +211,117 @@ def load_relationship_context_safely(
     }
 
 
+def build_reply_context_layers(
+    persona_prompt: PersonaPrompt,
+    memory_results: list[MemorySearchResult],
+    short_context_items: list[ShortContextItem],
+    event: MessageEvent,
+    user_text: str,
+    speaker_name: str,
+    relationship: RelationshipContext | None,
+) -> tuple[ReplyContextLayer, ...]:
+    layers: list[ReplyContextLayer] = [
+        ReplyContextLayer(
+            name="persona",
+            title="基础人设",
+            role="system",
+            content=persona_prompt.content.rstrip(),
+        )
+    ]
+    if relationship is not None:
+        layers.append(
+            ReplyContextLayer(
+                name="relationship",
+                title="关系上下文",
+                role="system",
+                content=build_relationship_prompt(relationship, speaker_name),
+            )
+        )
+    memory_prompt = build_memory_prompt(memory_results, speaker_name)
+    if memory_prompt:
+        layers.append(
+            ReplyContextLayer(
+                name="memory",
+                title="长期记忆",
+                role="system",
+                content=memory_prompt,
+            )
+        )
+    recent_context_prompt = build_recent_context_prompt(short_context_items)
+    if recent_context_prompt:
+        layers.append(
+            ReplyContextLayer(
+                name="recent_context",
+                title="短期上下文",
+                role="user",
+                content=recent_context_prompt,
+            )
+        )
+    layers.append(
+        ReplyContextLayer(
+            name="current_message",
+            title="当前消息",
+            role="user",
+            content=build_current_message_prompt(event, user_text),
+        )
+    )
+    return tuple(layers)
+
+
+def build_messages_from_layers(layers: tuple[ReplyContextLayer, ...]) -> tuple[ChatMessage, ...]:
+    system_parts = [layer.content for layer in layers if layer.role == "system" and layer.content]
+    user_parts = [layer.content for layer in layers if layer.role == "user" and layer.content]
+    return (
+        ChatMessage(role="system", content="\n".join(system_parts).rstrip() + "\n"),
+        ChatMessage(role="user", content="\n\n".join(user_parts).rstrip()),
+    )
+
+
 def build_system_prompt(
     persona_prompt: PersonaPrompt,
     memory_results: list[MemorySearchResult],
     speaker_name: str,
     relationship: RelationshipContext | None,
 ) -> str:
-    lines = [persona_prompt.content.rstrip()]
-    if relationship is not None:
-        lines.extend(build_relationship_prompt_lines(relationship, speaker_name))
-    if not memory_results:
-        return "\n".join(lines) + "\n"
+    """兼容测试和脚本的 system prompt 构造入口。"""
 
-    lines.extend(
-        [
-            "",
-            f"可参考的长期记忆（均描述当前说话用户：{speaker_name}，不是卡咔自己）：",
-            "说明：记忆正文中的“我 / 我的 / 本人”默认指当前说话用户，不指卡咔。",
-        ]
-    )
+    layers: list[ReplyContextLayer] = [
+        ReplyContextLayer(
+            name="persona",
+            title="基础人设",
+            role="system",
+            content=persona_prompt.content.rstrip(),
+        )
+    ]
+    if relationship is not None:
+        layers.append(
+            ReplyContextLayer(
+                name="relationship",
+                title="关系上下文",
+                role="system",
+                content=build_relationship_prompt(relationship, speaker_name),
+            )
+        )
+    memory_prompt = build_memory_prompt(memory_results, speaker_name)
+    if memory_prompt:
+        layers.append(
+            ReplyContextLayer(
+                name="memory",
+                title="长期记忆",
+                role="system",
+                content=memory_prompt,
+            )
+        )
+    return build_messages_from_layers(layers)[0].content
+
+
+def build_memory_prompt(memory_results: list[MemorySearchResult], speaker_name: str) -> str:
+    if not memory_results:
+        return ""
+    lines = [
+        f"可参考的长期记忆（均描述当前说话用户：{speaker_name}，不是卡咔自己）：",
+        "说明：记忆正文中的“我 / 我的 / 本人”默认指当前说话用户，不指卡咔。",
+    ]
     for index, result in enumerate(memory_results, start=1):
         lines.append(f"{index}. 当前说话用户：{result.memory.memory_text}")
     lines.extend(
@@ -229,18 +338,17 @@ def build_system_prompt(
     return "\n".join(lines)
 
 
-def build_relationship_prompt_lines(
+def build_relationship_prompt(
     relationship: RelationshipContext,
     speaker_name: str,
-) -> list[str]:
+) -> str:
     label_map = {
         "owner": "主人 / 最亲近的维护者",
         "familiar": "熟人",
         "regular": "普通熟悉群友",
         "stranger": "陌生人或新近出现的人",
     }
-    lines = [
-        "",
+    lines: list[str] = [
         f"当前说话者关系：{label_map.get(relationship.level, relationship.level)}（{speaker_name}）。",
         (
             "关系信号："
@@ -278,7 +386,36 @@ def build_relationship_prompt_lines(
                 "- 保持礼貌和边界感，不要套近乎或主动表现得很亲密。",
             ]
         )
-    return lines
+    return "\n".join(lines)
+
+
+def build_relationship_prompt_lines(
+    relationship: RelationshipContext,
+    speaker_name: str,
+) -> list[str]:
+    """兼容旧测试和临时脚本。"""
+
+    return ["", *build_relationship_prompt(relationship, speaker_name).splitlines()]
+
+
+def build_recent_context_prompt(short_context_items: list[ShortContextItem] | None = None) -> str:
+    if not short_context_items:
+        return ""
+    return "\n".join(
+        [
+            "近期对话（从旧到新，供理解上下文，不要机械复述）：",
+            format_short_context(short_context_items),
+        ]
+    )
+
+
+def build_current_message_prompt(
+    event: MessageEvent,
+    user_text: str,
+) -> str:
+    display_name = event.display_name or event.user_id
+    scene_hint = f"当前场景：{event.platform}/{event.scene_type}，说话的人：{display_name}。"
+    return f"{scene_hint}\n当前用户消息：{user_text}"
 
 
 def build_user_prompt(
@@ -286,16 +423,10 @@ def build_user_prompt(
     user_text: str,
     short_context_items: list[ShortContextItem] | None = None,
 ) -> str:
-    display_name = event.display_name or event.user_id
-    scene_hint = f"当前场景：{event.platform}/{event.scene_type}，说话的人：{display_name}。"
-    if not short_context_items:
-        return f"{scene_hint}\n用户消息：{user_text}"
-    return "\n".join(
-        [
-            scene_hint,
-            "近期对话（从旧到新，供理解上下文，不要机械复述）：",
-            format_short_context(short_context_items),
-            "",
-            f"当前用户消息：{user_text}",
-        ]
-    )
+    """兼容测试和脚本的 user prompt 构造入口。"""
+
+    parts = [
+        build_recent_context_prompt(short_context_items),
+        build_current_message_prompt(event, user_text),
+    ]
+    return "\n\n".join(part for part in parts if part)

@@ -70,8 +70,16 @@ type ReplyContextMessage = {
   content: string;
 };
 
+type ReplyContextLayer = {
+  name: string;
+  title: string;
+  role: string;
+  content: string;
+};
+
 type ReplyContextPreview = {
   messages: ReplyContextMessage[];
+  layers: ReplyContextLayer[];
   metadata: Record<string, unknown>;
   used_memory_ids: number[];
   memory_count: number;
@@ -1178,6 +1186,12 @@ function SearchPage({
             <div className="prompt-grid">
               <PromptBlock title="System Prompt" content={systemMessage?.content || ""} />
               <PromptBlock title="User Prompt" content={userMessage?.content || ""} />
+              <PromptBlock
+                title="Prompt Layers"
+                content={(preview.layers || [])
+                  .map((layer) => `# ${layer.title} (${layer.name} / ${layer.role})\n${layer.content}`)
+                  .join("\n\n")}
+              />
               <PromptBlock title="Metadata" content={JSON.stringify(preview.metadata, null, 2)} />
             </div>
           ) : (

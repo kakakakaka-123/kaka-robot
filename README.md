@@ -251,7 +251,7 @@ inputs / outputs 记录正常
 最近对话筛选查看正常
 ```
 
-当前已经完成“回复时读取正式长期记忆”的第一版接入：`search_memories.py` 的检索逻辑已经抽成正式模块，`kaka-core` 回复前会按当前用户、场景和消息检索少量 `active` 记忆，并把命中的记忆作为可参考背景放进模型 prompt。当前也已接入第一版短期上下文，默认读取同场景最近 30 分钟内最多 20 条输入记录，总字符上限 1200，排除当前消息。回复前还会注入第一版关系上下文，按主人、熟人、普通熟悉群友和陌生人粗分表达边界。基础人设已经从代码拆到 `prompts/kaka_persona.md`，后续正式写人设时优先改这个文件。长期记忆、短期上下文、关系阈值和人设路径都可通过 `.env` 调整。程序里也已经内置自动候选分析和自动候选区复核，两者都在整点触发。
+当前已经完成“回复时读取正式长期记忆”的第一版接入：`search_memories.py` 的检索逻辑已经抽成正式模块，`kaka-core` 回复前会按当前用户、场景和消息检索少量 `active` 记忆，并把命中的记忆作为可参考背景放进模型 prompt。当前也已接入第一版短期上下文，默认读取同场景最近 30 分钟内最多 20 条输入记录，总字符上限 1200，排除当前消息。回复前还会注入第一版关系上下文，按主人、熟人、普通熟悉群友和陌生人粗分表达边界。基础人设已经从代码拆到 `prompts/kaka_persona.md`，后续正式写人设时优先改这个文件。回复上下文内部已经分为 `persona / relationship / memory / recent_context / current_message` 层，方便后续继续接入用户画像和情绪状态。长期记忆、短期上下文、关系阈值和人设路径都可通过 `.env` 调整。程序里也已经内置自动候选分析和自动候选区复核，两者都在整点触发。
 
 当前也已经完成本地 Web 管理台第一版接入。用户日常查看总览、管理正式记忆、预览回复检索和检查运行状态，优先使用 `/admin`；正式记忆可以在页面内新增、编辑、归档、恢复和删除。最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，Python 脚本主要留给开发、测试、批量修复和应急排查。
 
@@ -261,7 +261,7 @@ inputs / outputs 记录正常
 2. 默认最多取最近 30 分钟内 20 条同场景短期上下文。
 3. 基础人设来自 `prompts/kaka_persona.md`，动态关系和记忆会追加在后面。
 4. 记忆和短期上下文只是背景，不强迫模型主动提起或机械复述。
-5. 响应 metadata 会记录 `persona_prompt_source`、`used_memory_ids`、`memory_count`、`memory_injection_enabled`、`short_context_input_ids`、`short_context_count`、`relationship_level`、`relationship_is_owner` 和关系计数。
+5. 响应 metadata 会记录 `context_layer_names`、`persona_prompt_source`、`used_memory_ids`、`memory_count`、`memory_injection_enabled`、`short_context_input_ids`、`short_context_count`、`relationship_level`、`relationship_is_owner` 和关系计数。
 6. 后续情绪、用户画像和更细关系维度应继续接入 `kaka_core.context.builder`，不要散落在聊天服务里。
 
 当前暂时不要做图片、表情包、语音和复杂主动行为。先保证文本闭环、原始记录和开发工具长期稳定。

@@ -531,8 +531,18 @@ def preview_reply_context(
         }
         for message in reply_context.messages
     ]
+    layers = [
+        {
+            "name": layer.name,
+            "title": layer.title,
+            "role": layer.role,
+            "content": layer.content,
+        }
+        for layer in reply_context.layers
+    ]
     return {
         "messages": messages,
+        "layers": layers,
         "metadata": reply_context.metadata,
         "used_memory_ids": reply_context.metadata.get("used_memory_ids", []),
         "memory_count": reply_context.metadata.get("memory_count", 0),

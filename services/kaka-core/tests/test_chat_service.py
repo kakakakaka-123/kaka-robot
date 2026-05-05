@@ -94,6 +94,12 @@ async def test_generate_chat_response_uses_persona_prompt_file(monkeypatch, tmp_
     assert response.metadata["persona_prompt_source"] == "file"
     assert response.metadata["persona_prompt_path"] == str(persona_path)
     assert response.metadata["persona_prompt_fallback_used"] is False
+    assert response.metadata["context_layer_names"] == [
+        "persona",
+        "relationship",
+        "current_message",
+    ]
+    assert response.metadata["context_layer_count"] == 3
     assert "persona_prompt_error" not in response.metadata
     get_settings.cache_clear()
 
@@ -164,6 +170,12 @@ async def test_generate_chat_response_injects_relevant_memories(monkeypatch, tmp
     assert response.metadata["memory_injection_enabled"] is True
     assert response.metadata["memory_count"] == 1
     assert response.metadata["used_memory_ids"] == [1]
+    assert response.metadata["context_layer_names"] == [
+        "persona",
+        "relationship",
+        "memory",
+        "current_message",
+    ]
     get_settings.cache_clear()
 
 
@@ -424,6 +436,12 @@ async def test_generate_chat_response_injects_short_context(monkeypatch, tmp_pat
     assert response.metadata["short_context_count"] == 9
     assert response.metadata["short_context_input_ids"] == list(range(1, 10))
     assert response.metadata["short_context_window_minutes"] == 30
+    assert response.metadata["context_layer_names"] == [
+        "persona",
+        "relationship",
+        "recent_context",
+        "current_message",
+    ]
     get_settings.cache_clear()
 
 
