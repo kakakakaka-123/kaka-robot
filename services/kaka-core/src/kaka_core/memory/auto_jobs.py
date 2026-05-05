@@ -6,10 +6,16 @@ from typing import Any
 
 from kaka_core.storage.database import create_session_factory, init_database
 from kaka_core.storage.models import AutoJobRunRecord, utc_now
+from kaka_core.storage.repository import (
+    release_event_processing_lock,
+    try_acquire_event_processing_lock,
+)
 
 AUTO_JOB_STATUS_SUCCESS = "success"
 AUTO_JOB_STATUS_SKIPPED = "skipped"
 AUTO_JOB_STATUS_FAILED = "failed"
+AUTO_JOB_LOCK_LEASE_SECONDS = 3600
+AUTO_JOB_LOCK_PREFIX = "auto_job:"
 
 
 @dataclass(frozen=True)
@@ -68,3 +74,39 @@ def record_auto_job_run_safely(data: AutoJobRunData) -> str | None:
     except Exception as exc:  # noqa: BLE001
         return str(exc)
     return None
+
+
+def acquire_auto_job_lock_safely(job_name: str) -> tuple[str | None, str | None]:
+    """获取跨进程自动任务锁。
+
+    返回 (owner_token, None) 表示拿到锁；返回 (None, None) 表示已有任务在运行；
+    返回 (None, error) 表示锁本身读写失败。
+    """
+
+    try:
+        init_database()
+        session_factory = create_session_factory()
+        with session_factory() as session:
+            owner_token = try_acquire_event_processing_lock(
+                session,
+                auto_job_lock_id(job_name),
+                lease_seconds=AUTO_JOB_LOCK_LEASE_SECONDS,
+            )
+            return owner_token, None
+    except Exception as exc:  # noqa: BLE001
+        return None, str(exc)
+
+
+def release_auto_job_lock_safely(job_name: str, owner_token: str) -> str | None:
+    try:
+        init_database()
+        session_factory = create_session_factory()
+        with session_factory() as session:
+            release_event_processing_lock(session, auto_job_lock_id(job_name), owner_token)
+    except Exception as exc:  # noqa: BLE001
+        return str(exc)
+    return None
+
+
+def auto_job_lock_id(job_name: str) -> str:
+    return f"{AUTO_JOB_LOCK_PREFIX}{job_name}"

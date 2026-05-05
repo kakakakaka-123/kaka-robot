@@ -113,6 +113,10 @@ class ReplyContextPreviewRequest(BaseModel):
     display_name: str | None = None
 
 
+class TriggerAutoJobRequest(BaseModel):
+    force: bool = False
+
+
 def get_admin_session() -> Iterator[Session]:
     init_database()
     session_factory = create_session_factory()
@@ -170,6 +174,7 @@ def conversations(
     session: SessionDep,
     ids: IdsQuery = None,
     limit: int = 50,
+    offset: int = 0,
     group_id: str | None = None,
     user_id: str | None = None,
     date: str | None = None,
@@ -181,6 +186,7 @@ def conversations(
     filters = build_filters(
         ids=ids,
         limit=limit,
+        offset=offset,
         group_id=group_id,
         user_id=user_id,
         target_date=date,
@@ -190,6 +196,14 @@ def conversations(
         output_reason=output_reason,
     )
     return service.list_conversations(session, filters)
+
+
+@admin_api_router.get("/conversations/{input_id}")
+def conversation_detail(input_id: int, session: SessionDep) -> dict:
+    try:
+        return service.get_conversation_detail(session, input_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @admin_api_router.get("/inputs")
@@ -421,6 +435,14 @@ def reply_context_preview(request: ReplyContextPreviewRequest) -> dict:
         private=request.private,
         display_name=service.normalize_text(request.display_name),
     )
+
+
+@admin_api_router.post("/auto-jobs/{job_name}/trigger")
+async def trigger_auto_job(job_name: str, request: TriggerAutoJobRequest, session: SessionDep) -> dict:
+    try:
+        return await service.trigger_auto_job(session, job_name, force=request.force)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def mount_web_console(app) -> None:

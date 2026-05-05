@@ -5,10 +5,11 @@ the local web console at `/admin`; scripts stay available for tests, debugging, 
 one-off repair work.
 
 The current web console covers overview, formal memory pagination/create/edit,
-memory archive/restore/delete, memory search, reply-context preview, and system
-status. Conversations, input analysis, memory candidates, and candidate merge
-operations still exist in the admin API, scripts, and database, but they are no
-longer exposed as daily web pages.
+memory archive/restore/delete, prompt preview, conversation replay, and system
+status. The replay page shows only real replied conversations and resolves the
+short context plus used memories from reply metadata. Input analysis, memory
+candidates, and candidate merge operations still exist in the admin API,
+scripts, and database, but they are no longer exposed as daily web pages.
 
 The candidate merge core logic now lives in `kaka_core.memory.merge`. The
 `merge_memory_candidates.py` script is a thin CLI wrapper around that module, and
@@ -21,6 +22,8 @@ Current policy:
 - Keep reusable behavior importable; avoid hiding core logic inside `main()`.
 - Prefer adding web-console API behavior under `kaka_core.admin` instead of adding more
   user-facing scripts.
+- Auto analysis and auto review can be manually triggered from `/admin` system status,
+  but still use cross-process locks to avoid duplicate runs.
 
 Recommended daily entry points for developers:
 

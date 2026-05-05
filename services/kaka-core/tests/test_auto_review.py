@@ -68,6 +68,59 @@ async def test_auto_review_skips_below_threshold(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_auto_review_force_ignores_threshold(monkeypatch):
+    session_factory = create_session_factory()
+    seed_candidates(session_factory, 3)
+    review_module = load_review_script_module()
+
+    async def fake_review_rows(rows, _router, _batch_size, _existing_keys):
+        decisions = []
+        for row in rows:
+            decisions.append(
+                review_module.ReviewDecision(
+                    candidate=row.candidate,
+                    action="reject",
+                    memory_text="",
+                    memory_type="user_fact",
+                    confidence=0.8,
+                    reason="手动复核测试",
+                )
+            )
+        return decisions
+
+    monkeypatch.setattr(review_module, "review_rows", fake_review_rows)
+    monkeypatch.setattr(auto_review, "init_database", lambda: None)
+    monkeypatch.setattr(auto_review, "create_session_factory", lambda: session_factory)
+    monkeypatch.setattr(auto_review, "load_review_candidates_module", lambda: review_module)
+    monkeypatch.setattr(auto_review, "LLMRouter", lambda _settings: object())
+    monkeypatch.setattr(
+        auto_review,
+        "get_settings",
+        lambda: SimpleNamespace(llm=SimpleNamespace(can_call_remote=True)),
+    )
+
+    summary = await auto_review.run_auto_review_check(
+        MemoryReviewSettings(
+            enabled=True,
+            trigger_count=20,
+            batch_size=10,
+            max_runs_per_check=2,
+        ),
+        force=True,
+    )
+
+    with session_factory() as session:
+        pending = auto_review.count_pending_candidates(session)
+
+    assert summary.ran is True
+    assert summary.reason == "手动触发执行"
+    assert summary.checked_count == 3
+    assert summary.processed_runs == 1
+    assert summary.rejected == 3
+    assert pending == 0
+
+
+@pytest.mark.anyio
 async def test_auto_review_check_and_record_writes_skipped_run(monkeypatch):
     session_factory = create_session_factory()
     seed_candidates(session_factory, 3)
@@ -95,6 +148,45 @@ async def test_auto_review_check_and_record_writes_skipped_run(monkeypatch):
     assert run.status == "skipped"
     assert run.checked_count == 3
     assert run.processed_runs == 0
+
+
+@pytest.mark.anyio
+async def test_auto_review_check_and_record_skips_when_job_lock_is_held(monkeypatch):
+    session_factory = create_session_factory()
+
+    monkeypatch.setattr(auto_review, "init_database", lambda: None)
+    monkeypatch.setattr(auto_review, "create_session_factory", lambda: session_factory)
+    monkeypatch.setattr(auto_jobs, "init_database", lambda: None)
+    monkeypatch.setattr(auto_jobs, "create_session_factory", lambda: session_factory)
+
+    owner_token, lock_error = auto_jobs.acquire_auto_job_lock_safely(
+        auto_review.AUTO_REVIEW_JOB_NAME
+    )
+    assert owner_token is not None
+    assert lock_error is None
+
+    async def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("auto review should not run while the cross-process lock is held")
+
+    monkeypatch.setattr(auto_review, "run_auto_review_check", fail_if_called)
+
+    summary = await auto_review.run_auto_review_check_and_record(
+        MemoryReviewSettings(
+            enabled=True,
+            trigger_count=20,
+            batch_size=10,
+            max_runs_per_check=2,
+        )
+    )
+
+    with session_factory() as session:
+        run = session.scalar(select(AutoJobRunRecord))
+
+    assert summary.ran is False
+    assert summary.reason == "已有同名自动任务在运行"
+    assert run is not None
+    assert run.job_name == "auto_review"
+    assert run.status == "skipped"
 
 
 @pytest.mark.anyio

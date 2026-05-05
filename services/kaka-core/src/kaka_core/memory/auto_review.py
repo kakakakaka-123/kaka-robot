@@ -17,7 +17,9 @@ from kaka_core.memory.auto_jobs import (
     AUTO_JOB_STATUS_SKIPPED,
     AUTO_JOB_STATUS_SUCCESS,
     AutoJobRunData,
+    acquire_auto_job_lock_safely,
     record_auto_job_run_safely,
+    release_auto_job_lock_safely,
 )
 from kaka_core.storage.database import create_session_factory, init_database
 from kaka_core.storage.models import MemoryCandidateRecord, utc_now
@@ -96,6 +98,8 @@ def seconds_until_next_hour(now: datetime | None = None) -> float:
 
 async def run_auto_review_check(
     settings: MemoryReviewSettings | None = None,
+    *,
+    force: bool = False,
 ) -> AutoReviewRunSummary:
     config = settings or get_settings().memory_review
     trigger_count = max(1, config.trigger_count)
@@ -107,7 +111,14 @@ async def run_auto_review_check(
     with session_factory() as session:
         pending_count = count_pending_candidates(session)
 
-    if pending_count < trigger_count:
+    if pending_count <= 0:
+        return AutoReviewRunSummary(
+            checked_count=pending_count,
+            ran=False,
+            reason="没有可处理候选",
+        )
+
+    if pending_count < trigger_count and not force:
         return AutoReviewRunSummary(
             checked_count=pending_count,
             ran=False,
@@ -127,11 +138,15 @@ async def run_auto_review_check(
     summary = AutoReviewRunSummary(
         checked_count=pending_count,
         ran=True,
-        reason="已执行",
+        reason="手动触发执行" if force else "已执行",
     )
 
     for _ in range(max_runs_per_check):
         with session_factory() as session:
+            current_count = count_pending_candidates(session)
+            if current_count <= 0:
+                break
+
             filters = review_candidates.ReviewFilters(
                 limit=batch_size,
                 batch_size=batch_size,
@@ -169,10 +184,43 @@ async def run_auto_review_check(
 
 async def run_auto_review_check_and_record(
     settings: MemoryReviewSettings | None = None,
+    *,
+    force: bool = False,
 ) -> AutoReviewRunSummary:
     started_at = utc_now()
+    lock_token, lock_error = acquire_auto_job_lock_safely(AUTO_REVIEW_JOB_NAME)
+    if lock_error:
+        finished_at = utc_now()
+        record_error = record_auto_job_run_safely(
+            AutoJobRunData(
+                job_name=AUTO_REVIEW_JOB_NAME,
+                status=AUTO_JOB_STATUS_FAILED,
+                reason="任务锁获取失败",
+                error_count=1,
+                error_message=lock_error,
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+        )
+        if record_error:
+            print(f"自动候选区 LLM 复核运行记录写入失败：{record_error}")
+        raise RuntimeError(f"自动候选区 LLM 复核任务锁获取失败：{lock_error}")
+    if lock_token is None:
+        summary = AutoReviewRunSummary(
+            checked_count=0,
+            ran=False,
+            reason="已有同名自动任务在运行",
+        )
+        finished_at = utc_now()
+        record_error = record_auto_job_run_safely(
+            auto_review_summary_to_job_run(summary, started_at, finished_at, force=force)
+        )
+        if record_error:
+            print(f"自动候选区 LLM 复核运行记录写入失败：{record_error}")
+        return summary
+
     try:
-        summary = await run_auto_review_check(settings)
+        summary = await run_auto_review_check(settings, force=force)
     except Exception as exc:
         finished_at = utc_now()
         record_error = record_auto_job_run_safely(
@@ -189,10 +237,15 @@ async def run_auto_review_check_and_record(
         if record_error:
             print(f"自动候选区 LLM 复核运行记录写入失败：{record_error}")
         raise
+    finally:
+        if lock_token is not None:
+            release_error = release_auto_job_lock_safely(AUTO_REVIEW_JOB_NAME, lock_token)
+            if release_error:
+                print(f"自动候选区 LLM 复核任务锁释放失败：{release_error}")
 
     finished_at = utc_now()
     record_error = record_auto_job_run_safely(
-        auto_review_summary_to_job_run(summary, started_at, finished_at)
+        auto_review_summary_to_job_run(summary, started_at, finished_at, force=force)
     )
     if record_error:
         print(f"自动候选区 LLM 复核运行记录写入失败：{record_error}")
@@ -203,6 +256,8 @@ def auto_review_summary_to_job_run(
     summary: AutoReviewRunSummary,
     started_at: datetime,
     finished_at: datetime,
+    *,
+    force: bool = False,
 ) -> AutoJobRunData:
     return AutoJobRunData(
         job_name=AUTO_REVIEW_JOB_NAME,
@@ -215,6 +270,7 @@ def auto_review_summary_to_job_run(
         skipped_count=0,
         error_count=summary.errors,
         metadata={
+            "force": force,
             "approved": summary.approved,
             "rejected": summary.rejected,
             "duplicates": summary.duplicates,

@@ -12,6 +12,7 @@ from kaka_core.storage.models import (
     InputRecord,
     MemoryCandidateRecord,
     MemoryRecord,
+    OutputRecord,
     SceneRecord,
     UserRecord,
 )
@@ -63,6 +64,9 @@ def test_admin_summary_and_lists(monkeypatch, tmp_path):
 
     assert summary.status_code == 200
     assert summary.json()["counts"]["pending_candidates"] == 1
+    assert summary.json()["settings"]["memory_auto_analysis_interval_seconds"] == 0
+    assert summary.json()["settings"]["memory_auto_analysis_batch_limit"] == 50
+    assert summary.json()["settings"]["memory_auto_review_batch_size"] == 10
     assert summary.json()["recent_auto_job_runs"][0]["job_name"] == "auto_analysis"
     assert summary.json()["recent_auto_job_runs"][0]["status"] == "skipped"
     assert candidates.status_code == 200
@@ -80,6 +84,176 @@ def test_admin_summary_redacts_database_password():
 
     assert "secret-password" not in redacted
     assert "***" in redacted
+
+
+def test_admin_conversation_detail_resolves_reply_metadata(monkeypatch, tmp_path):
+    client = create_test_client(monkeypatch, tmp_path)
+    with create_session_factory()() as session:
+        user = session.scalar(select(UserRecord))
+        scene = session.scalar(select(SceneRecord))
+        short_context_input = session.scalar(select(InputRecord))
+        memory = session.scalar(select(MemoryRecord))
+        assert user is not None
+        assert scene is not None
+        assert short_context_input is not None
+        assert memory is not None
+
+        current_input = InputRecord(
+            event_id="admin-input-2",
+            user=user,
+            scene=scene,
+            content_type="text",
+            content_text="你还记得我的回复偏好吗？",
+            raw_event={},
+            extra_metadata={},
+            analysis_status="not_analyzed",
+            created_at=datetime(2026, 5, 3, 1, 5, tzinfo=timezone.utc),
+        )
+        session.add(current_input)
+        session.flush()
+        session.add(
+            OutputRecord(
+                output_id="admin-output-2",
+                input=current_input,
+                scene=scene,
+                user=user,
+                output_origin="passive",
+                output_reason="keyword",
+                should_reply=True,
+                content_text="记得，你喜欢直接的回答。",
+                extra_metadata={
+                    "llm_model": "test-model",
+                    "used_memory_ids": [memory.id],
+                    "memory_count": 1,
+                    "short_context_input_ids": [short_context_input.id],
+                    "short_context_count": 1,
+                    "relationship_level": "owner",
+                },
+                created_at=datetime(2026, 5, 3, 1, 6, tzinfo=timezone.utc),
+            )
+        )
+        session.commit()
+        current_input_id = current_input.id
+
+    response = client.get(f"/admin/api/conversations/{current_input_id}")
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["conversation"]["id"] == current_input_id
+    assert data["conversation"]["output"]["content_text"] == "记得，你喜欢直接的回答。"
+    assert data["metadata"]["llm_model"] == "test-model"
+    assert data["metadata"]["relationship_level"] == "owner"
+    assert data["used_memory_ids"] == [1]
+    assert data["used_memories"][0]["memory_text"] == "用户喜欢直接的回答。"
+    assert data["short_context_input_ids"] == [1]
+    assert data["short_context"][0]["content_text"] == "我正在开发卡咔。"
+
+
+def test_admin_conversations_support_pagination(monkeypatch, tmp_path):
+    client = create_test_client(monkeypatch, tmp_path)
+    with create_session_factory()() as session:
+        user = session.scalar(select(UserRecord))
+        scene = session.scalar(select(SceneRecord))
+        assert user is not None
+        assert scene is not None
+        for index in range(4):
+            input_record = InputRecord(
+                event_id=f"admin-replied-input-{index}",
+                user=user,
+                scene=scene,
+                content_type="text",
+                content_text=f"分页回复输入 {index}",
+                raw_event={},
+                extra_metadata={},
+                analysis_status="analyzed",
+                created_at=datetime(2026, 5, 3, 1, 10 + index, tzinfo=timezone.utc),
+            )
+            session.add(input_record)
+            session.flush()
+            session.add(
+                OutputRecord(
+                    output_id=f"admin-replied-output-{index}",
+                    input=input_record,
+                    scene=scene,
+                    user=user,
+                    output_origin="passive",
+                    output_reason="keyword",
+                    should_reply=True,
+                    content_text=f"分页回复输出 {index}",
+                    extra_metadata={},
+                    created_at=datetime(2026, 5, 3, 1, 10 + index, tzinfo=timezone.utc),
+                )
+            )
+        session.commit()
+
+    first_page = client.get("/admin/api/conversations", params={"reply_state": "replied", "limit": 2, "offset": 0})
+    second_page = client.get("/admin/api/conversations", params={"reply_state": "replied", "limit": 2, "offset": 2})
+    first_data = first_page.json()
+    second_data = second_page.json()
+
+    assert first_page.status_code == 200
+    assert second_page.status_code == 200
+    assert first_data["total"] == 4
+    assert first_data["limit"] == 2
+    assert first_data["offset"] == 0
+    assert [item["id"] for item in first_data["items"]] == [5, 4]
+    assert second_data["total"] == 4
+    assert second_data["limit"] == 2
+    assert second_data["offset"] == 2
+    assert [item["id"] for item in second_data["items"]] == [3, 2]
+
+
+def test_admin_can_trigger_auto_analysis_manually(monkeypatch, tmp_path):
+    client = create_test_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/admin/api/auto-jobs/auto_analysis/trigger",
+        json={"force": True},
+    )
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["job_name"] == "auto_analysis"
+    assert data["job_label"] == "自动候选分析"
+    assert data["force"] is True
+    assert data["summary"]["ran"] is False
+    assert data["summary"]["reason"] == "没有可处理记录"
+    assert data["latest_run"]["job_name"] == "auto_analysis"
+    assert data["latest_run"]["status"] == "skipped"
+    assert data["latest_run"]["metadata"]["force"] is True
+
+
+def test_admin_can_trigger_auto_review_manually(monkeypatch, tmp_path):
+    client = create_test_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/admin/api/auto-jobs/auto_review/trigger",
+        json={"force": True},
+    )
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["job_name"] == "auto_review"
+    assert data["job_label"] == "自动候选复核"
+    assert data["force"] is True
+    assert data["summary"]["ran"] is False
+    assert data["summary"]["checked_count"] == 1
+    assert data["summary"]["reason"] == "LLM 未启用或缺少 LLM_API_KEY"
+    assert data["latest_run"]["job_name"] == "auto_review"
+    assert data["latest_run"]["status"] == "skipped"
+    assert data["latest_run"]["metadata"]["force"] is True
+
+
+def test_admin_rejects_unknown_auto_job(monkeypatch, tmp_path):
+    client = create_test_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/admin/api/auto-jobs/not-a-job/trigger",
+        json={"force": True},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unsupported auto job: not-a-job"
 
 
 def test_admin_merge_candidate_and_archive_memory(monkeypatch, tmp_path):
@@ -264,7 +438,7 @@ def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path)
     assert "当前说话者关系" in data["messages"][0]["content"]
 
 
-def test_admin_memories_are_ordered_by_id(monkeypatch, tmp_path):
+def test_admin_memories_are_ordered_by_newest_id_first(monkeypatch, tmp_path):
     client = create_test_client(monkeypatch, tmp_path)
     session_factory = create_session_factory()
     with session_factory() as session:
@@ -285,7 +459,7 @@ def test_admin_memories_are_ordered_by_id(monkeypatch, tmp_path):
                 status="active",
                 merge_reason="测试",
                 created_at=datetime(2026, 5, 3, 1, 4, tzinfo=timezone.utc),
-                updated_at=datetime(2026, 5, 3, 1, 1, tzinfo=timezone.utc),
+                updated_at=datetime(2026, 5, 3, 1, 4, tzinfo=timezone.utc),
             )
         )
         session.commit()
@@ -294,7 +468,7 @@ def test_admin_memories_are_ordered_by_id(monkeypatch, tmp_path):
     ids = [item["id"] for item in response.json()["items"]]
 
     assert response.status_code == 200
-    assert ids == sorted(ids)
+    assert ids == sorted(ids, reverse=True)
 
 
 def test_admin_memories_support_pagination(monkeypatch, tmp_path):
@@ -316,7 +490,8 @@ def test_admin_memories_support_pagination(monkeypatch, tmp_path):
     assert second_data["total"] == 5
     assert second_data["limit"] == 2
     assert second_data["offset"] == 2
-    assert [item["id"] for item in second_data["items"]] == [3, 4]
+    assert [item["id"] for item in first_data["items"]] == [5, 4]
+    assert [item["id"] for item in second_data["items"]] == [3, 2]
 
 
 def test_admin_api_requires_token_when_local_only_disabled(monkeypatch, tmp_path):

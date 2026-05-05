@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from types import ModuleType
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from kaka_core.config.settings import get_settings
 from kaka_core.context.builder import build_reply_context
+from kaka_core.memory import auto_analysis, auto_review
 from kaka_core.memory import merge as memory_merge
 from kaka_core.memory.search import MemorySearchFilters, format_scene_type, search_user_memories
 from kaka_core.storage.models import (
@@ -82,8 +83,13 @@ def get_admin_summary(session: Session) -> dict[str, Any]:
             "llm_chat_model": settings.llm.chat_model,
             "memory_auto_analysis_enabled": settings.memory_analysis.enabled,
             "memory_auto_analysis_trigger_count": settings.memory_analysis.trigger_count,
+            "memory_auto_analysis_batch_limit": settings.memory_analysis.batch_limit,
+            "memory_auto_analysis_max_runs_per_check": settings.memory_analysis.max_runs_per_check,
+            "memory_auto_analysis_interval_seconds": settings.memory_analysis.interval_seconds,
             "memory_auto_review_enabled": settings.memory_review.enabled,
             "memory_auto_review_trigger_count": settings.memory_review.trigger_count,
+            "memory_auto_review_batch_size": settings.memory_review.batch_size,
+            "memory_auto_review_max_runs_per_check": settings.memory_review.max_runs_per_check,
             "memory_reply_injection_enabled": settings.memory_reply.enabled,
             "memory_reply_limit": settings.memory_reply.limit,
             "memory_reply_min_score": settings.memory_reply.min_score,
@@ -124,6 +130,16 @@ def list_auto_job_runs(session: Session, *, limit: int = 8) -> list[dict[str, An
     return [auto_job_run_to_dict(row) for row in rows]
 
 
+def latest_auto_job_run(session: Session, job_name: str) -> dict[str, Any] | None:
+    row = session.scalars(
+        select(AutoJobRunRecord)
+        .where(AutoJobRunRecord.job_name == job_name)
+        .order_by(AutoJobRunRecord.finished_at.desc(), AutoJobRunRecord.id.desc())
+        .limit(1)
+    ).first()
+    return auto_job_run_to_dict(row) if row is not None else None
+
+
 def auto_job_run_to_dict(record: AutoJobRunRecord) -> dict[str, Any]:
     duration_seconds = max(0.0, (record.finished_at - record.started_at).total_seconds())
     return {
@@ -162,6 +178,24 @@ def auto_job_status_label(status: str) -> str:
     }.get(status, status)
 
 
+async def trigger_auto_job(session: Session, job_name: str, *, force: bool = False) -> dict[str, Any]:
+    if job_name == auto_analysis.AUTO_ANALYSIS_JOB_NAME:
+        summary = await auto_analysis.run_auto_analysis_check_and_record(force=force)
+    elif job_name == auto_review.AUTO_REVIEW_JOB_NAME:
+        summary = await auto_review.run_auto_review_check_and_record(force=force)
+    else:
+        raise ValueError(f"unsupported auto job: {job_name}")
+
+    session.expire_all()
+    return {
+        "job_name": job_name,
+        "job_label": auto_job_label(job_name),
+        "force": force,
+        "summary": asdict(summary),
+        "latest_run": latest_auto_job_run(session, job_name),
+    }
+
+
 def list_conversations(session: Session, filters: ListFilters) -> dict[str, Any]:
     statement = (
         select(InputRecord, UserRecord, SceneRecord, OutputRecord)
@@ -183,9 +217,43 @@ def list_conversations(session: Session, filters: ListFilters) -> dict[str, Any]
     if filters.output_reason:
         statement = statement.where(OutputRecord.output_reason == filters.output_reason)
 
-    statement = statement.order_by(InputRecord.created_at.desc()).limit(filters.limit)
+    total = int(session.scalar(select(func.count()).select_from(statement.subquery())) or 0)
+    statement = statement.order_by(InputRecord.created_at.desc()).offset(filters.offset).limit(filters.limit)
     rows = session.execute(statement).all()
-    return {"items": [serialize_conversation(*row) for row in rows], "limit": filters.limit}
+    return {
+        "items": [serialize_conversation(*row) for row in rows],
+        "limit": filters.limit,
+        "offset": filters.offset,
+        "total": total,
+    }
+
+
+def get_conversation_detail(session: Session, input_id: int) -> dict[str, Any]:
+    """读取一次真实对话的回复复盘详情。"""
+
+    row = session.execute(
+        select(InputRecord, UserRecord, SceneRecord, OutputRecord)
+        .join(UserRecord, InputRecord.user_id == UserRecord.id)
+        .join(SceneRecord, InputRecord.scene_id == SceneRecord.id)
+        .outerjoin(OutputRecord, OutputRecord.input_id == InputRecord.id)
+        .where(InputRecord.id == input_id)
+    ).first()
+    if row is None:
+        raise LookupError(f"conversation input not found: {input_id}")
+
+    input_record, user, scene, output = row
+    metadata = dict(output.extra_metadata or {}) if output is not None else {}
+    used_memory_ids = parse_metadata_ids(metadata.get("used_memory_ids"))
+    short_context_input_ids = parse_metadata_ids(metadata.get("short_context_input_ids"))
+
+    return {
+        "conversation": serialize_conversation(input_record, user, scene, output),
+        "metadata": metadata,
+        "used_memory_ids": used_memory_ids,
+        "used_memories": load_memories_by_ids(session, used_memory_ids),
+        "short_context_input_ids": short_context_input_ids,
+        "short_context": load_conversations_by_input_ids(session, short_context_input_ids),
+    }
 
 
 def list_inputs(session: Session, filters: ListFilters) -> dict[str, Any]:
@@ -362,7 +430,7 @@ def list_memories(session: Session, filters: ListFilters) -> dict[str, Any]:
             MemoryRecord.created_at < end_utc,
         )
     total = int(session.scalar(select(func.count()).select_from(statement.subquery())) or 0)
-    statement = statement.order_by(MemoryRecord.id.asc()).offset(filters.offset).limit(filters.limit)
+    statement = statement.order_by(MemoryRecord.id.desc()).offset(filters.offset).limit(filters.limit)
     rows = session.execute(statement).all()
     return {
         "items": [serialize_memory(*row) for row in rows],
@@ -773,6 +841,7 @@ def serialize_output(output: OutputRecord | None) -> dict[str, Any] | None:
         "should_reply": output.should_reply,
         "no_reply_reason": output.no_reply_reason,
         "content_text": output.content_text or "",
+        "metadata": output.extra_metadata or {},
         "created_at": format_local_time(output.created_at),
     }
 
@@ -797,6 +866,64 @@ def parse_ids(value: str | None) -> tuple[int, ...]:
         if number > 0 and number not in ids:
             ids.append(number)
     return tuple(ids)
+
+
+def parse_metadata_ids(value: object) -> list[int]:
+    """从输出 metadata 中解析 ID 列表。"""
+
+    if value is None:
+        return []
+    if isinstance(value, str):
+        try:
+            return list(parse_ids(value))
+        except ValueError:
+            return []
+    if not isinstance(value, (list, tuple, set)):
+        return []
+
+    ids: list[int] = []
+    for item in value:
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            continue
+        if number > 0 and number not in ids:
+            ids.append(number)
+    return ids
+
+
+def load_memories_by_ids(session: Session, memory_ids: list[int]) -> list[dict[str, Any]]:
+    if not memory_ids:
+        return []
+    rows = session.execute(
+        select(MemoryRecord, UserRecord, SceneRecord, MemoryCandidateRecord)
+        .join(UserRecord, MemoryRecord.user_id == UserRecord.id)
+        .outerjoin(SceneRecord, MemoryRecord.scene_id == SceneRecord.id)
+        .outerjoin(MemoryCandidateRecord, MemoryRecord.source_candidate_id == MemoryCandidateRecord.id)
+        .where(MemoryRecord.id.in_(memory_ids))
+    ).all()
+    items_by_id = {
+        memory.id: serialize_memory(memory, user, scene, candidate)
+        for memory, user, scene, candidate in rows
+    }
+    return [items_by_id[memory_id] for memory_id in memory_ids if memory_id in items_by_id]
+
+
+def load_conversations_by_input_ids(session: Session, input_ids: list[int]) -> list[dict[str, Any]]:
+    if not input_ids:
+        return []
+    rows = session.execute(
+        select(InputRecord, UserRecord, SceneRecord, OutputRecord)
+        .join(UserRecord, InputRecord.user_id == UserRecord.id)
+        .join(SceneRecord, InputRecord.scene_id == SceneRecord.id)
+        .outerjoin(OutputRecord, OutputRecord.input_id == InputRecord.id)
+        .where(InputRecord.id.in_(input_ids))
+    ).all()
+    items_by_id = {
+        input_record.id: serialize_conversation(input_record, user, scene, output)
+        for input_record, user, scene, output in rows
+    }
+    return [items_by_id[input_id] for input_id in input_ids if input_id in items_by_id]
 
 
 def normalize_text(value: str | None) -> str | None:

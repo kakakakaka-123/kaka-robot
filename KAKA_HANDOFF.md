@@ -38,8 +38,8 @@ D:\Python\AgentRobot\kaka-v2
 -> 配置模板和本地自检
 -> 第一版长期记忆设计
 -> 本地 Web 管理台 /admin
--> 正式记忆分页、归档、恢复、硬删除、新增和编辑
--> 回复检索和回复上下文预览
+-> 正式记忆倒序分页、归档、恢复、硬删除、新增和编辑
+-> 提示预演和对话复盘
 -> 回复前短期上下文注入
 -> 回复前关系上下文注入
 -> 基础人设 Prompt 文件化
@@ -70,21 +70,23 @@ D:\Python\AgentRobot\kaka-v2
 - 已有 `manage_memories.py`，可把正式记忆切到 `active` / `archived`，或在确认错误、垃圾、敏感时硬删除；脚本顶部已提供 PyCharm 简单配置 `PYCHARM_MEMORY_IDS / PYCHARM_ACTION / PYCHARM_APPLY`，用户用数据库可视化软件看到 `memories.id` 后可以直接填 ID 预览或执行。
 - 已有 `search_memories.py`，可按当前用户和当前消息，只读预览会命中的少量正式记忆，并打印分数和命中原因；脚本顶部可直接填 `PYCHARM_USER_ID / PYCHARM_TEXT / PYCHARM_GROUP_ID`；`kaka-core` 回复前已复用同一套检索逻辑注入少量正式记忆。
 - 已有程序内置自动候选分析：通过 `.env` 的 `MEMORY_AUTO_ANALYSIS_ENABLED=true` 开启；kaka-core 启动后等到下一个整点检查，`not_analyzed >= 50` 时最多跑两轮，每轮最多 50 条。
-- 已有自动任务运行记录：自动候选分析和自动候选区复核每次检查都会写入 `auto_job_runs`，状态为 `success / skipped / failed`；`/admin` 运行状态页会显示最近记录。
+- 已有自动任务运行记录：自动候选分析和自动候选区复核每次检查都会写入 `auto_job_runs`，状态为 `success / skipped / failed`；`/admin` 运行状态页会显示最近记录，并支持手动触发一次自动分析或复核。
+- 已有跨进程自动任务锁：自动候选分析和自动候选区复核会通过 `auto_job:*` 锁避免多个 `kaka-core` 进程在整点或手动触发时重复执行；拿不到锁会记录为 `skipped`。
 - 已做一轮长期记忆 E2E 合成数据回放，已验证分析、候选写入、LLM 复核、正式记忆查看和检索脚本的完整链路。
 - `show_recent_conversations.py`、`show_memory_candidates.py`、`merge_memory_candidates.py`、`review_memory_candidates.py`、`show_memories.py`、`manage_memories.py`、`search_memories.py`、`analyze_inputs.py`、`seed_memory_e2e_data.py` 和 `doctor.py` 已在文件顶部写明 PyCharm 右键运行方式和可用参数；数据脚本优先提供 `PYCHARM_*` 简单配置，写库默认关闭；用户不熟悉命令行参数，后续新增类似脚本也要沿用这个风格。
 - 已有根目录 `.env.example` 配置模板。
 - 已有 `scripts/doctor.py` 本地自检脚本，用于检查配置形状、数据库、导入和端口状态。
 - 已有 `docs/长期记忆设计.md`，明确第一版记什么、不记什么、`memories` 表建议和抽取规则。
-- 已有本地 Web 管理台：前端在 `apps/web-console`，`kaka-core` 托管 `/admin`，管理 API 在 `/admin/api/*`；当前 Web 界面只暴露总览、正式记忆、回复检索、运行状态和预留扩展入口。最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，不再作为日常 Web 页面暴露。
+- 已有本地 Web 管理台：前端在 `apps/web-console`，`kaka-core` 托管 `/admin`，管理 API 在 `/admin/api/*`；当前 Web 界面只暴露系统总览、正式记忆、提示预演、对话复盘、运行状态和预留扩展入口。最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，不再作为日常 Web 页面暴露。
 - Web 管理台已成为正式记忆的日常查看和管理入口；脚本现在主要留给开发、测试、批量修复、候选/输入后台处理和应急排查。
 - 近期已补上跨进程事件处理锁和 SQLite 时间戳修正，重复聊天事件在绕过进程内锁时也不会重复调用 LLM；管理总览继续脱敏 `database_url`。
 - 输入分析和候选区的写库能力仍保留在管理 API、脚本和数据库层；Web 日常页面暂不暴露这些后台处理入口。
-- 正式记忆页按 `memories.id` 稳定升序显示，支持每页 50 条分页、`active / archived / all` 切换、新增、编辑、归档、恢复和确认后的硬删除；危险写库动作都有确认弹窗。
+- 正式记忆页按 `memories.id` 倒序显示，支持每页 50 条分页、`active / archived / all` 切换、新增、编辑、归档、恢复和确认后的硬删除；新增、归档、恢复、删除后会刷新分页，保证仍按最新 ID 倒序展示；危险写库动作都有确认弹窗。
 - 手动新增正式记忆会写入 `source="manual"`，默认 `merge_reason="手动新增"`；编辑会同步更新 `memory_text / normalized_text / memory_type / confidence / source_text / status / merge_reason`，也可调整用户和群/私聊场景。
-- 回复检索页会同时请求正式记忆检索和回复上下文预览，展示 System Prompt、User Prompt、metadata、`used_memory_ids` 和命中数量，方便确认真实回复前会给模型什么上下文。
+- 提示预演页会同时请求正式记忆检索和回复上下文预览，展示 System Prompt、User Prompt、metadata、`used_memory_ids` 和命中数量，方便确认真实回复前会给模型什么上下文。
+- 对话复盘页只回查卡咔已经回复过的真实对话记录，列表每页 50 条；详情会从 `outputs.metadata.used_memory_ids` 和 `short_context_input_ids` 反查当次回复命中的正式记忆与短期上下文，短期上下文在左、正式记忆在右，并使用固定高度滚动窗口。
 - 基础人设 Prompt 已从代码拆到 `prompts/kaka_persona.md`；`KAKA_PERSONA_PROMPT_PATH` 可改路径，文件缺失或为空时回退到内置基础人设；metadata 会记录 `persona_prompt_source / persona_prompt_path / persona_prompt_fallback_used`。
-- 回复上下文已整理为显式层：`persona / relationship / memory / recent_context / current_message`；metadata 会记录 `context_layer_names`，`/admin` 回复检索页会展示 Prompt Layers。
+- 回复上下文已整理为显式层：`persona / relationship / memory / recent_context / current_message`；metadata 会记录 `context_layer_names`，`/admin` 提示预演页会展示 Prompt Layers。
 - 已接入第一版短期上下文：回复前从同场景最近输入和输出中读取上下文，默认只看最近 30 分钟，最多 20 条输入记录、总计 1200 字，排除当前消息；metadata 会记录 `short_context_enabled / short_context_count / short_context_input_ids`。
 - 已接入第一版关系上下文：通过 `KAKA_OWNER_USER_IDS`、历史输入数、最近 7 天输入数和 active 正式记忆数，把当前说话者粗分为 `owner / familiar / regular / stranger`；阈值为 familiar：历史输入 >=100 或最近 7 天 >=30 或 active 记忆 >=8，regular：历史输入 >=30 或最近 7 天 >=10 或 active 记忆 >=3；metadata 会记录 `relationship_level / relationship_is_owner / relationship_input_count / relationship_recent_input_count / relationship_active_memory_count`。这不是好感度系统，不维护亲密分数。
 - 脚本现在定位为开发、测试、排查和应急备用入口；用户日常管理优先使用网页。
@@ -94,11 +96,11 @@ D:\Python\AgentRobot\kaka-v2
 
 ```text
 kaka-protocol：5 passed（历史完整测试记录）
-kaka-core：111 passed
+kaka-core：120 passed
 qq-adapter：18 passed（历史完整测试记录）
 doctor：69 OK, 3 WARN, 0 FAIL
 web-console：npm run build passed
-2026-05-05 正式记忆 CRUD/分页和短期上下文相关针对性测试：36 passed
+2026-05-05 管理 API、对话复盘、自动任务和记忆上下文相关测试：120 passed
 2026-05-05 web-console：npm run build passed
 2026-05-05 git diff --check：passed
 用户 2026-05-05 实测：当前真实链路暂无大问题
@@ -134,7 +136,7 @@ memory_candidates.id=42 -> approved -> rejected -> approved
 下一个对话框最应该继续做：
 
 ```text
-先阅读本交接文档和 docs/下次上下文.md；如果继续验收，优先打开 http://127.0.0.1:8001/admin 手动检查正式记忆分页、新增、编辑、归档、恢复、硬删除和回复检索预览；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再按需要启动 QQ 链路，观察自动候选分析、自动候选区复核和回复时长期记忆使用是否稳定
+先阅读本交接文档和 docs/下次上下文.md；如果继续验收，优先打开 http://127.0.0.1:8001/admin 手动检查正式记忆倒序分页、新增、编辑、归档、恢复、硬删除、提示预演和对话复盘；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再按需要启动 QQ 链路，观察自动候选分析、自动候选区复核和回复时长期记忆使用是否稳定
 ```
 
 第一目标仍然只做文本：
@@ -837,15 +839,21 @@ AIoT 交互例子：
 55. 再次收紧 `.gitignore`：`data/media/*` 默认忽略，只保留 `data/media/.gitkeep`，避免后续媒体文件被误加入 Git。
 56. 补充并发幂等：`generate_chat_response` 现在按 `event_id` 加进程内异步锁，同一事件并发进入时只会有一次 LLM 调用，后续请求复用已保存 output。
 57. 修复 SQLite 事件处理锁的时间戳比较问题，跨进程重复聊天事件现在也能稳定复用已保存 output，不会因为 `leased_until` 时区比较失败而重复调用 LLM。
-58. 精简 Web 管理台日常页面：保留总览、正式记忆、回复检索、运行状态和预留扩展入口；最近对话、输入分析、候选区能力保留在 API、脚本和数据库中。
+58. 精简 Web 管理台日常页面：保留系统总览、正式记忆、提示预演、对话复盘、运行状态和预留扩展入口；最近对话、输入分析、候选区能力保留在 API、脚本和数据库中。
 59. 统一项目展示名为“卡咔”，入口文档改为 `KAKA_HANDOFF.md` 和 `卡咔电子生命系统设计文档.md`；技术目录、包名、环境变量和实际仓库路径继续保留英文/现有路径。
-60. 修复正式记忆页编号显示顺序：后端列表改为按 `MemoryRecord.id.asc()` 稳定排序，避免因为更新时间变化导致编号看起来乱跳。
+60. 修复正式记忆页编号显示顺序：后端列表改为按 `MemoryRecord.id.desc()` 稳定倒序，最新记忆优先展示；归档、恢复、新增和删除后会刷新分页，避免因为更新时间变化导致编号看起来乱跳。
 61. 正式记忆列表新增分页：`/admin/api/memories` 支持 `limit / offset / total`，前端默认每页 50 条，并提供上一页/下一页和总数显示。
-62. 回复检索页新增回复上下文预览：`POST /admin/api/reply-context/preview` 复用真实回复上下文组装器，前端展示 System Prompt、User Prompt、metadata 和命中记忆 ID，便于调试回复时实际注入的长期记忆。
+62. 提示预演页新增回复上下文预览：`POST /admin/api/reply-context/preview` 复用真实回复上下文组装器，前端展示 System Prompt、User Prompt、metadata 和命中记忆 ID，便于调试回复时实际注入的长期记忆。
 63. 正式记忆管理补齐“增”和“改”：新增 `POST /admin/api/memories` 和 `PATCH /admin/api/memories/{memory_id}`，Web 正式记忆页支持手动新增和单条编辑；归档、恢复和硬删除逻辑保留。
 64. 创建 `开发日志/2026-05-05.md`，同步正式记忆分页、回复上下文预览、正式记忆新增/编辑、测试结果和当前下一步建议。
 65. 新增第一版短期上下文：`SHORT_CONTEXT_ENABLED=true` 默认开启，`SHORT_CONTEXT_LIMIT=20`，`SHORT_CONTEXT_MAX_CHARS=1200`，`SHORT_CONTEXT_WINDOW_MINUTES=30`；回复上下文组装器会把同场景最近输入和卡咔回复压入 User Prompt，metadata 记录命中的 input id。
 66. 新增第一版关系上下文：`KAKA_OWNER_USER_IDS` 配置主人 QQ 号，`kaka_core.relationship.context` 用现有 `users / inputs / memories` 推断 `owner / familiar / regular / stranger`，并接入 `kaka_core.context.builder` 的 System Prompt 和 metadata；当前只做熟悉度粗分，不做复杂好感度机制。
+67. 将原“回复检索”拆分为“提示预演”和“对话复盘”：提示预演用于预测一条新消息回复前会注入什么上下文；对话复盘用于回查卡咔已经回复过的真实对话。
+68. 新增 `/admin/api/conversations` 分页返回 `items / total / limit / offset`，对话复盘固定查询已回复记录，前端每页 50 条。
+69. 新增 `/admin/api/conversations/{input_id}` 详情接口，按 `outputs.metadata.used_memory_ids` 和 `short_context_input_ids` 反查当次回复使用的正式记忆和短期上下文。
+70. 运行状态页新增自动候选分析/自动候选区复核手动触发按钮，后端 `POST /admin/api/auto-jobs/{job_name}/trigger` 支持 `force=true` 绕过数量门槛。
+71. 自动候选分析和自动候选区复核新增跨进程任务锁，避免多个仍在运行的 `kaka-core` 进程整点重复跑；拿不到锁会写入 `auto_job_runs` 的 skipped 记录。
+72. Web 管理台完成最终布局和颜色收敛：对话复盘详情区固定滚动窗口，短期上下文在左、命中记忆在右；亮色和暗色模式均已做高对比度配色。
 
 2026-05-04 本轮检查验证结果：
 
@@ -866,9 +874,9 @@ doctor：69 OK, 3 WARN, 0 FAIL
 2026-05-05 本轮检查验证结果：
 
 ```text
-kaka-core 全量测试：111 passed
+kaka-core 全量测试：120 passed
 kaka-protocol：5 passed
-后端针对性测试：tests/test_admin_api.py tests/test_chat_service.py tests/test_search_memories.py tests/test_manage_memories.py -> 36 passed
+后端覆盖：管理 API、对话复盘、自动任务、短期上下文、正式记忆和回复上下文相关测试 -> 120 passed
 web-console：npm run build passed
 git diff --check：passed
 用户实测：正式记忆新增/编辑和当前真实链路暂无大问题
@@ -877,7 +885,7 @@ git diff --check：passed
 下一步建议按顺序做：
 
 1. 启动 `kaka-core`，打开 `http://127.0.0.1:8001/admin` 做一次轻量手动验收。
-2. 检查左侧导航的总览、正式记忆、回复检索、运行状态和预留扩展是否正常。
+2. 检查左侧导航的系统总览、正式记忆、提示预演、对话复盘、运行状态和预留扩展是否正常。
 3. 在正式记忆页复查分页、新增、编辑、归档、恢复和确认后硬删除。
 4. 再启动 `qq-adapter` 保持真实 QQ 对话运行，观察自动候选分析和自动候选区复核是否稳定。
 5. 用响应 metadata 或数据库输出记录回查 `used_memory_ids`、`short_context_count`、`short_context_input_ids` 和 `relationship_level`。
@@ -900,7 +908,7 @@ QQ 发一句话
 -> show_memories.py 能查看正式记忆
 -> search_memories.py 能预览回复前可能命中的记忆
 -> manage_memories.py 能把不合适的正式记忆归档或删除
--> /admin 能完成总览查看、正式记忆分页/新增/编辑/归档/恢复/硬删除、回复检索预览和运行状态检查
+-> /admin 能完成系统总览查看、正式记忆倒序分页/新增/编辑/归档/恢复/硬删除、提示预演、对话复盘和运行状态检查
 -> 回复 metadata 能看到 `short_context_count` 和 `short_context_input_ids`
 -> 回复 metadata 能看到 `relationship_level`、`relationship_is_owner` 和关系计数
 -> 重复 QQ 事件不会重复调用 LLM 或重置分析状态

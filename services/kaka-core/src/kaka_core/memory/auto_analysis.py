@@ -17,7 +17,9 @@ from kaka_core.memory.auto_jobs import (
     AUTO_JOB_STATUS_SKIPPED,
     AUTO_JOB_STATUS_SUCCESS,
     AutoJobRunData,
+    acquire_auto_job_lock_safely,
     record_auto_job_run_safely,
+    release_auto_job_lock_safely,
 )
 from kaka_core.storage.database import create_session_factory, init_database
 from kaka_core.storage.models import InputRecord, utc_now
@@ -103,6 +105,8 @@ def next_check_delay(settings: MemoryAnalysisSettings, now: datetime | None = No
 
 async def run_auto_analysis_check(
     settings: MemoryAnalysisSettings | None = None,
+    *,
+    force: bool = False,
 ) -> AutoAnalysisRunSummary:
     config = settings or get_settings().memory_analysis
     trigger_count = max(1, config.trigger_count)
@@ -113,7 +117,14 @@ async def run_auto_analysis_check(
     with session_factory() as session:
         pending_count = count_not_analyzed_inputs(session)
 
-    if pending_count < trigger_count:
+    if pending_count <= 0:
+        return AutoAnalysisRunSummary(
+            checked_count=pending_count,
+            ran=False,
+            reason="没有可处理记录",
+        )
+
+    if pending_count < trigger_count and not force:
         return AutoAnalysisRunSummary(
             checked_count=pending_count,
             ran=False,
@@ -133,13 +144,15 @@ async def run_auto_analysis_check(
     summary = AutoAnalysisRunSummary(
         checked_count=pending_count,
         ran=True,
-        reason="已执行",
+        reason="手动触发执行" if force else "已执行",
     )
 
     for _ in range(max_runs_per_check):
         with session_factory() as session:
             current_count = count_not_analyzed_inputs(session)
-            if current_count < trigger_count:
+            if current_count <= 0:
+                break
+            if current_count < trigger_count and not force:
                 break
 
             filters = analyze_inputs.AnalysisFilters(
@@ -183,10 +196,43 @@ async def run_auto_analysis_check(
 
 async def run_auto_analysis_check_and_record(
     settings: MemoryAnalysisSettings | None = None,
+    *,
+    force: bool = False,
 ) -> AutoAnalysisRunSummary:
     started_at = utc_now()
+    lock_token, lock_error = acquire_auto_job_lock_safely(AUTO_ANALYSIS_JOB_NAME)
+    if lock_error:
+        finished_at = utc_now()
+        record_error = record_auto_job_run_safely(
+            AutoJobRunData(
+                job_name=AUTO_ANALYSIS_JOB_NAME,
+                status=AUTO_JOB_STATUS_FAILED,
+                reason="任务锁获取失败",
+                error_count=1,
+                error_message=lock_error,
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+        )
+        if record_error:
+            print(f"自动记忆候选分析运行记录写入失败：{record_error}")
+        raise RuntimeError(f"自动记忆候选分析任务锁获取失败：{lock_error}")
+    if lock_token is None:
+        summary = AutoAnalysisRunSummary(
+            checked_count=0,
+            ran=False,
+            reason="已有同名自动任务在运行",
+        )
+        finished_at = utc_now()
+        record_error = record_auto_job_run_safely(
+            auto_analysis_summary_to_job_run(summary, started_at, finished_at, force=force)
+        )
+        if record_error:
+            print(f"自动记忆候选分析运行记录写入失败：{record_error}")
+        return summary
+
     try:
-        summary = await run_auto_analysis_check(settings)
+        summary = await run_auto_analysis_check(settings, force=force)
     except Exception as exc:
         finished_at = utc_now()
         record_error = record_auto_job_run_safely(
@@ -203,10 +249,15 @@ async def run_auto_analysis_check_and_record(
         if record_error:
             print(f"自动记忆候选分析运行记录写入失败：{record_error}")
         raise
+    finally:
+        if lock_token is not None:
+            release_error = release_auto_job_lock_safely(AUTO_ANALYSIS_JOB_NAME, lock_token)
+            if release_error:
+                print(f"自动记忆候选分析任务锁释放失败：{release_error}")
 
     finished_at = utc_now()
     record_error = record_auto_job_run_safely(
-        auto_analysis_summary_to_job_run(summary, started_at, finished_at)
+        auto_analysis_summary_to_job_run(summary, started_at, finished_at, force=force)
     )
     if record_error:
         print(f"自动记忆候选分析运行记录写入失败：{record_error}")
@@ -217,6 +268,8 @@ def auto_analysis_summary_to_job_run(
     summary: AutoAnalysisRunSummary,
     started_at: datetime,
     finished_at: datetime,
+    *,
+    force: bool = False,
 ) -> AutoJobRunData:
     return AutoJobRunData(
         job_name=AUTO_ANALYSIS_JOB_NAME,
@@ -229,6 +282,7 @@ def auto_analysis_summary_to_job_run(
         skipped_count=summary.skipped_marked,
         error_count=summary.llm_errors_left_unprocessed + summary.missing_llm_results,
         metadata={
+            "force": force,
             "llm_errors_left_unprocessed": summary.llm_errors_left_unprocessed,
             "missing_llm_results": summary.missing_llm_results,
         },
