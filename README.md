@@ -85,7 +85,7 @@ QQ 收到消息
 - 观察接口：`/v1/observe` 可以只记录消息，不调用模型、不回复。
 - `apps/qq-adapter`：QQ 文本适配器，已经接入 NoneBot2。
 - NapCat + OneBot V11 真实 QQ 文本闭环。
-- SQLite 基础记录：`inputs` 记录卡咔收到/观察到的输入，`outputs` 记录卡咔对已处理输入形成的输出结果或响应决策，`memory_candidates` 记录待审核长期记忆候选，`memories` 记录已经合并的正式长期记忆，默认写入 `data/kaka.sqlite3`。
+- SQLite 基础记录：`inputs` 记录卡咔收到/观察到的输入，`outputs` 记录卡咔对已处理输入形成的输出结果或响应决策，`memory_candidates` 记录待审核长期记忆候选，`memories` 记录已经合并的正式长期记忆，`auto_job_runs` 记录自动后台任务运行结果，默认写入 `data/kaka.sqlite3`。
 - 最近对话查看脚本：支持按数量、群、用户、日期、场景、是否输出和输出原因筛选，并显示北京时间。
 - 最小输入分析脚本：扫描 `inputs.analysis_status=not_analyzed`，支持规则初筛、批量 LLM 判断、只读预览、候选区写入和 skipped/analyzed 状态更新。
 - 记忆候选查看脚本：`show_memory_candidates.py` 可按候选 ID、状态、类型、群、用户、日期查看 `memory_candidates`。
@@ -95,13 +95,13 @@ QQ 收到消息
 - 正式记忆查看脚本：`show_memories.py` 可按记忆 ID、状态、类型、来源、群、用户、日期查看 `memories`。
 - 正式记忆管理脚本：`manage_memories.py` 可把记忆切到 `active` / `archived`，或在确认错误、垃圾、敏感时硬删除。
 - 正式记忆检索预览脚本：`search_memories.py` 可按当前用户和当前消息，只读预览会命中的少量正式记忆。
-- 本地 Web 管理台：启动 `kaka-core` 后打开 `http://127.0.0.1:8001/admin`；当前 Web 界面保留总览、正式记忆、回复检索预览、运行状态和预留扩展入口。正式记忆页支持按 ID 稳定排序、每页 50 条分页、新增、编辑、归档、恢复和确认后硬删除；最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，但不再作为日常 Web 页面暴露。
+- 本地 Web 管理台：启动 `kaka-core` 后打开 `http://127.0.0.1:8001/admin`；当前 Web 界面保留总览、正式记忆、回复检索预览、运行状态和预留扩展入口。正式记忆页支持按 ID 稳定排序、每页 50 条分页、新增、编辑、归档、恢复和确认后硬删除；运行状态页会显示最近自动候选分析/复核记录；最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，但不再作为日常 Web 页面暴露。
 - 管理 API：`/admin/api/*`，默认只允许本机访问；如果设置 `ADMIN_LOCAL_ONLY=false`，必须配置 `ADMIN_API_TOKEN` 并在请求头传 `X-Kaka-Admin-Token`。Web 管理台顶部的“管理 Token”输入框会把 token 暂存在当前浏览器会话里并自动带到 API 请求里。核心代码在 `services/kaka-core/src/kaka_core/api/admin_routes.py` 和 `services/kaka-core/src/kaka_core/admin/service.py`；总览里展示的数据库连接串会自动脱敏。后续面向用户的数据管理功能优先扩展这里。
 - 基础人设 Prompt 文件：`prompts/kaka_persona.md` 会作为回复时 System Prompt 的基础层；关系上下文和长期记忆会在它之后动态追加。路径可用 `KAKA_PERSONA_PROMPT_PATH` 调整，文件缺失时会回退到内置基础人设。
 - 回复前关系上下文：`kaka-core` 会用 `KAKA_OWNER_USER_IDS`、历史输入数、最近 7 天输入数和 active 正式记忆数，把当前说话者粗分为 `owner / familiar / regular / stranger`。这不是好感度系统，只用于让卡咔不把主人当陌生人，也不对新人装熟。
 - 长期记忆 E2E 测试造数脚本：`seed_memory_e2e_data.py` 只用于本地测试，默认预览，加 `--apply` 才写入测试输入。
-- 程序内置自动候选分析：可选开启后，`kaka-core` 在下一个整点及之后每个整点检查一次；`not_analyzed >= 50` 时最多处理两轮，每轮 50 条。
-- 程序内置自动候选区复核：可选开启后，`kaka-core` 在下一个整点及之后每个整点检查一次；`pending >= 20` 时最多处理一批，每批 10 条。
+- 程序内置自动候选分析：可选开启后，`kaka-core` 在下一个整点及之后每个整点检查一次；`not_analyzed >= 50` 时最多处理两轮，每轮 50 条；每次检查会写入 `auto_job_runs`。
+- 程序内置自动候选区复核：可选开启后，`kaka-core` 在下一个整点及之后每个整点检查一次；`pending >= 20` 时最多处理一批，每批 10 条；每次检查会写入 `auto_job_runs`。
 - 根目录 `.env.example` 配置模板。
 - `scripts/doctor.py` 本地自检脚本。
 - 项目专用虚拟环境 `.venv`。
@@ -142,6 +142,7 @@ inputs：卡咔收到/观察到的输入，包含后续分析状态
 outputs：卡咔对已处理输入形成的输出结果或响应决策，包含输出来源和输出原因
 memory_candidates：大模型或规则整理出的长期记忆候选，状态默认为 pending，后续可合并到正式记忆
 memories：已经从候选区合并出的正式长期记忆，后续回复检索只应读取 active 记忆
+auto_job_runs：自动候选分析和自动候选复核的运行记录
 ```
 
 当前状态语义：

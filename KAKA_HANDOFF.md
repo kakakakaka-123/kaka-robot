@@ -27,6 +27,7 @@ D:\Python\AgentRobot\kaka-v2
 -> 批量 LLM 记忆候选判断和写入流程
 -> 候选区查看脚本
 -> 程序内置整点自动候选分析
+-> 自动任务运行记录 auto_job_runs
 -> 正式长期记忆表 memories
 -> 候选区合并脚本
 -> 候选区合并核心模块 kaka_core.memory.merge
@@ -57,7 +58,7 @@ D:\Python\AgentRobot\kaka-v2
 - NapCat 已经能把真实 QQ 私聊和群聊文本消息转发到当前项目。
 - 卡咔已经可以在 QQ 中通过 DeepSeek 生成文本回复。
 - 群聊已加触发限制：私聊全回复，群聊只在 @机器人 或包含“卡咔”时回复；普通群聊文本不回复，但会写入 `inputs` 作为观察记录。
-- `kaka-core` 已经接入 SQLite 基础记录，默认文件为 `data/kaka.sqlite3`；`inputs` 记录卡咔收到/观察到的输入，`outputs` 记录卡咔对已处理输入形成的输出结果或响应决策，`memory_candidates` 记录长期记忆候选，`memories` 记录已合并的正式长期记忆。
+- `kaka-core` 已经接入 SQLite 基础记录，默认文件为 `data/kaka.sqlite3`；`inputs` 记录卡咔收到/观察到的输入，`outputs` 记录卡咔对已处理输入形成的输出结果或响应决策，`memory_candidates` 记录长期记忆候选，`memories` 记录已合并的正式长期记忆，`auto_job_runs` 记录自动候选分析/复核的运行结果。
 - `inputs` 只保留后续分析状态 `analysis_status`；`outputs` 记录 `output_origin / output_reason / no_reply_reason`。旧 SQLite 会自动把 `messages/responses` 迁移为 `inputs/outputs`，不会清空已有数据。
 - 已有最近对话查看脚本，支持按 `inputs.id`、数量、群、用户、日期、场景、是否输出、输出来源和输出原因筛选，并把 UTC 时间显示为北京时间。
 - 已有最小输入分析脚本，支持扫描 `inputs.analysis_status=not_analyzed`，可按 `inputs.id`、群、用户、日期、私聊、群聊筛选；`--llm-batch` 只读批量判断 `not_sure`，`--write-candidates` 才写入 `memory_candidates` 并标记 `analyzed/skipped`。
@@ -69,6 +70,7 @@ D:\Python\AgentRobot\kaka-v2
 - 已有 `manage_memories.py`，可把正式记忆切到 `active` / `archived`，或在确认错误、垃圾、敏感时硬删除；脚本顶部已提供 PyCharm 简单配置 `PYCHARM_MEMORY_IDS / PYCHARM_ACTION / PYCHARM_APPLY`，用户用数据库可视化软件看到 `memories.id` 后可以直接填 ID 预览或执行。
 - 已有 `search_memories.py`，可按当前用户和当前消息，只读预览会命中的少量正式记忆，并打印分数和命中原因；脚本顶部可直接填 `PYCHARM_USER_ID / PYCHARM_TEXT / PYCHARM_GROUP_ID`；`kaka-core` 回复前已复用同一套检索逻辑注入少量正式记忆。
 - 已有程序内置自动候选分析：通过 `.env` 的 `MEMORY_AUTO_ANALYSIS_ENABLED=true` 开启；kaka-core 启动后等到下一个整点检查，`not_analyzed >= 50` 时最多跑两轮，每轮最多 50 条。
+- 已有自动任务运行记录：自动候选分析和自动候选区复核每次检查都会写入 `auto_job_runs`，状态为 `success / skipped / failed`；`/admin` 运行状态页会显示最近记录。
 - 已做一轮长期记忆 E2E 合成数据回放，已验证分析、候选写入、LLM 复核、正式记忆查看和检索脚本的完整链路。
 - `show_recent_conversations.py`、`show_memory_candidates.py`、`merge_memory_candidates.py`、`review_memory_candidates.py`、`show_memories.py`、`manage_memories.py`、`search_memories.py`、`analyze_inputs.py`、`seed_memory_e2e_data.py` 和 `doctor.py` 已在文件顶部写明 PyCharm 右键运行方式和可用参数；数据脚本优先提供 `PYCHARM_*` 简单配置，写库默认关闭；用户不熟悉命令行参数，后续新增类似脚本也要沿用这个风格。
 - 已有根目录 `.env.example` 配置模板。
@@ -92,9 +94,9 @@ D:\Python\AgentRobot\kaka-v2
 
 ```text
 kaka-protocol：5 passed（历史完整测试记录）
-kaka-core：109 passed
+kaka-core：111 passed
 qq-adapter：18 passed（历史完整测试记录）
-doctor：70 OK, 1 WARN, 0 FAIL
+doctor：69 OK, 3 WARN, 0 FAIL
 web-console：npm run build passed
 2026-05-05 正式记忆 CRUD/分页和短期上下文相关针对性测试：36 passed
 2026-05-05 web-console：npm run build passed
@@ -855,7 +857,7 @@ web-console：npm run build passed
 compileall：passed
 pip check：No broken requirements found
 npm audit --registry=https://registry.npmjs.org --audit-level=high：0 vulnerabilities
-doctor：56 OK, 3 WARN, 0 FAIL
+doctor：69 OK, 3 WARN, 0 FAIL
 真实 SQLite 结构检查：duplicate_output_inputs=0，unique_source_input_indexes=0，outputs.input_id unique index=1
 真实管理 API 回放：通过
 浏览器管理台回放：通过
@@ -864,7 +866,7 @@ doctor：56 OK, 3 WARN, 0 FAIL
 2026-05-05 本轮检查验证结果：
 
 ```text
-kaka-core 全量测试：97 passed
+kaka-core 全量测试：111 passed
 kaka-protocol：5 passed
 后端针对性测试：tests/test_admin_api.py tests/test_chat_service.py tests/test_search_memories.py tests/test_manage_memories.py -> 36 passed
 web-console：npm run build passed

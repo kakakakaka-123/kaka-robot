@@ -24,8 +24,28 @@ import { useEffect, useMemo, useState } from "react";
 type Summary = {
   counts: Record<string, number>;
   memory_statuses: Record<string, number>;
+  recent_auto_job_runs: AutoJobRun[];
   settings: Record<string, string | number | boolean | null | undefined>;
   server_time: string;
+};
+
+type AutoJobRun = {
+  id: number;
+  job_name: string;
+  job_label: string;
+  status: string;
+  status_label: string;
+  reason: string;
+  checked_count: number;
+  processed_runs: number;
+  inserted_count: number;
+  updated_count: number;
+  skipped_count: number;
+  error_count: number;
+  error_message?: string | null;
+  started_at: string;
+  finished_at: string;
+  duration_seconds: number;
 };
 
 type UserInfo = {
@@ -713,7 +733,14 @@ export function App() {
               onSubmit={() => void searchMemories()}
             />
           )}
-          {activePage === "status" && <StatusPage counts={counts} settings={settings} serverTime={summary?.server_time ?? "未连接"} />}
+          {activePage === "status" && (
+            <StatusPage
+              autoJobRuns={summary?.recent_auto_job_runs ?? []}
+              counts={counts}
+              settings={settings}
+              serverTime={summary?.server_time ?? "未连接"}
+            />
+          )}
           {activePage === "reserved" && <ReservedPage />}
         </div>
       </main>
@@ -1213,10 +1240,12 @@ function PromptBlock({ title, content }: { title: string; content: string }) {
 }
 
 function StatusPage({
+  autoJobRuns,
   counts,
   settings,
   serverTime
 }: {
+  autoJobRuns: AutoJobRun[];
   counts: Record<string, number>;
   settings: Summary["settings"];
   serverTime: string;
@@ -1242,6 +1271,31 @@ function StatusPage({
             远程模型: settingText(settings.llm_enabled)
           }}
         />
+      </Panel>
+      <Panel title="自动任务运行记录" subtitle="最近自动候选分析和自动候选复核结果">
+        {autoJobRuns.length ? (
+          <div className="result-list">
+            {autoJobRuns.map((run) => (
+              <article className="result-item" key={run.id}>
+                <div className="result-head">
+                  <strong>
+                    #{run.id} / {run.job_label}
+                  </strong>
+                  <span className="score-badge">{run.status_label}</span>
+                </div>
+                <p>{run.reason}</p>
+                <small>
+                  {run.finished_at} / 检查 {run.checked_count} / 轮数 {run.processed_runs} / 新增{" "}
+                  {run.inserted_count} / 更新 {run.updated_count} / 跳过 {run.skipped_count} / 错误{" "}
+                  {run.error_count} / {run.duration_seconds.toFixed(1)} 秒
+                </small>
+                {run.error_message && <small>{run.error_message}</small>}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState message="暂无自动任务运行记录" />
+        )}
       </Panel>
     </div>
   );

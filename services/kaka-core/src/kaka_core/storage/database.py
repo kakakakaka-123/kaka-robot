@@ -73,6 +73,24 @@ EXPECTED_MEMORY_CANDIDATE_COLUMNS = [
     "updated_at",
 ]
 
+EXPECTED_AUTO_JOB_RUN_COLUMNS = [
+    "id",
+    "job_name",
+    "status",
+    "reason",
+    "checked_count",
+    "processed_runs",
+    "inserted_count",
+    "updated_count",
+    "skipped_count",
+    "error_count",
+    "error_message",
+    "metadata",
+    "started_at",
+    "finished_at",
+    "created_at",
+]
+
 
 def create_database_engine(database_url: str | None = None) -> Engine:
     """创建数据库引擎，并确保本地数据库文件所在目录存在。"""
@@ -225,6 +243,10 @@ def migrate_sqlite_schema(engine: Engine) -> None:
         if "memories" in table_names and should_rebuild_memories_table(connection):
             rebuild_memories_table(connection)
 
+        table_names = get_sqlite_table_names(connection)
+        if "auto_job_runs" in table_names and should_rebuild_auto_job_runs_table(connection):
+            rebuild_auto_job_runs_table(connection)
+
         create_sqlite_indexes(connection)
 
 
@@ -274,6 +296,13 @@ def should_rebuild_memory_candidates_table(connection) -> bool:
     if columns != EXPECTED_MEMORY_CANDIDATE_COLUMNS:
         return True
     return has_unique_index_on_columns(connection, "memory_candidates", ["source_input_id"])
+
+
+def should_rebuild_auto_job_runs_table(connection) -> bool:
+    """判断 auto_job_runs 是否需要重建。"""
+
+    columns = get_sqlite_ordered_column_names(connection, "auto_job_runs")
+    return columns != EXPECTED_AUTO_JOB_RUN_COLUMNS
 
 
 def rebuild_inputs_table(connection) -> None:
@@ -578,6 +607,86 @@ def rebuild_memories_table(connection) -> None:
     connection.execute(text("ALTER TABLE memories__new RENAME TO memories"))
 
 
+def rebuild_auto_job_runs_table(connection) -> None:
+    """重建 auto_job_runs 表，固定字段顺序。"""
+
+    old_columns = get_sqlite_column_names(connection, "auto_job_runs")
+    connection.execute(text("DROP TABLE IF EXISTS auto_job_runs__new"))
+    connection.execute(
+        text(
+            """
+            CREATE TABLE auto_job_runs__new (
+                id INTEGER NOT NULL,
+                job_name VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                reason TEXT NOT NULL,
+                checked_count INTEGER NOT NULL,
+                processed_runs INTEGER NOT NULL,
+                inserted_count INTEGER NOT NULL,
+                updated_count INTEGER NOT NULL,
+                skipped_count INTEGER NOT NULL,
+                error_count INTEGER NOT NULL,
+                error_message TEXT,
+                metadata JSON NOT NULL,
+                started_at DATETIME NOT NULL,
+                finished_at DATETIME NOT NULL,
+                created_at DATETIME NOT NULL,
+                PRIMARY KEY (id)
+            )
+            """
+        )
+    )
+    select_error_message = "error_message" if "error_message" in old_columns else "NULL"
+    select_metadata = "COALESCE(metadata, '{}')" if "metadata" in old_columns else "'{}'"
+    select_created_at = (
+        "COALESCE(created_at, finished_at, CURRENT_TIMESTAMP)"
+        if "created_at" in old_columns
+        else "COALESCE(finished_at, CURRENT_TIMESTAMP)"
+    )
+    connection.execute(
+        text(
+            f"""
+            INSERT INTO auto_job_runs__new (
+                id,
+                job_name,
+                status,
+                reason,
+                checked_count,
+                processed_runs,
+                inserted_count,
+                updated_count,
+                skipped_count,
+                error_count,
+                error_message,
+                metadata,
+                started_at,
+                finished_at,
+                created_at
+            )
+            SELECT
+                id,
+                job_name,
+                status,
+                COALESCE(reason, ''),
+                COALESCE(checked_count, 0),
+                COALESCE(processed_runs, 0),
+                COALESCE(inserted_count, 0),
+                COALESCE(updated_count, 0),
+                COALESCE(skipped_count, 0),
+                COALESCE(error_count, 0),
+                {select_error_message},
+                {select_metadata},
+                COALESCE(started_at, CURRENT_TIMESTAMP),
+                COALESCE(finished_at, CURRENT_TIMESTAMP),
+                {select_created_at}
+            FROM auto_job_runs
+            """
+        )
+    )
+    connection.execute(text("DROP TABLE auto_job_runs"))
+    connection.execute(text("ALTER TABLE auto_job_runs__new RENAME TO auto_job_runs"))
+
+
 def create_sqlite_indexes(connection) -> None:
     """补齐当前查询会用到的 SQLite 索引。"""
 
@@ -658,6 +767,17 @@ def create_sqlite_indexes(connection) -> None:
                 "CREATE INDEX IF NOT EXISTS ix_memory_candidates_status "
                 "ON memory_candidates (status)"
             )
+        )
+
+    if "auto_job_runs" in table_names:
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_auto_job_runs_job_name ON auto_job_runs (job_name)")
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_auto_job_runs_status ON auto_job_runs (status)")
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_auto_job_runs_finished_at ON auto_job_runs (finished_at)")
         )
 
 

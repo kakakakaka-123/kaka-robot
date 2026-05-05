@@ -250,3 +250,25 @@ class EventProcessingLockRecord(Base):
         default=utc_now,
         onupdate=utc_now,
     )
+
+
+class AutoJobRunRecord(Base):
+    """自动后台任务的一次运行记录。"""
+
+    __tablename__ = "auto_job_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    checked_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processed_runs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    inserted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

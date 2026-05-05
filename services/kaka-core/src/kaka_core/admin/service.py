@@ -17,6 +17,7 @@ from kaka_core.context.builder import build_reply_context
 from kaka_core.memory import merge as memory_merge
 from kaka_core.memory.search import MemorySearchFilters, format_scene_type, search_user_memories
 from kaka_core.storage.models import (
+    AutoJobRunRecord,
     InputRecord,
     MemoryCandidateRecord,
     MemoryRecord,
@@ -72,6 +73,7 @@ def get_admin_summary(session: Session) -> dict[str, Any]:
         "candidate_statuses": candidate_counts,
         "memory_statuses": memory_counts,
         "input_statuses": input_counts,
+        "recent_auto_job_runs": list_auto_job_runs(session, limit=8),
         "settings": {
             "database_url": redact_connection_url(settings.database.url),
             "llm_enabled": settings.llm.enabled,
@@ -111,6 +113,53 @@ def count_rows(session: Session, model: type) -> int:
 def count_by_field(session: Session, field: Any) -> dict[str, int]:
     rows = session.execute(select(field, func.count()).group_by(field)).all()
     return {str(key): int(value) for key, value in rows}
+
+
+def list_auto_job_runs(session: Session, *, limit: int = 8) -> list[dict[str, Any]]:
+    rows = session.scalars(
+        select(AutoJobRunRecord)
+        .order_by(AutoJobRunRecord.finished_at.desc(), AutoJobRunRecord.id.desc())
+        .limit(limit)
+    ).all()
+    return [auto_job_run_to_dict(row) for row in rows]
+
+
+def auto_job_run_to_dict(record: AutoJobRunRecord) -> dict[str, Any]:
+    duration_seconds = max(0.0, (record.finished_at - record.started_at).total_seconds())
+    return {
+        "id": record.id,
+        "job_name": record.job_name,
+        "job_label": auto_job_label(record.job_name),
+        "status": record.status,
+        "status_label": auto_job_status_label(record.status),
+        "reason": record.reason,
+        "checked_count": record.checked_count,
+        "processed_runs": record.processed_runs,
+        "inserted_count": record.inserted_count,
+        "updated_count": record.updated_count,
+        "skipped_count": record.skipped_count,
+        "error_count": record.error_count,
+        "error_message": record.error_message,
+        "metadata": record.extra_metadata or {},
+        "started_at": format_local_time(record.started_at),
+        "finished_at": format_local_time(record.finished_at),
+        "duration_seconds": round(duration_seconds, 3),
+    }
+
+
+def auto_job_label(job_name: str) -> str:
+    return {
+        "auto_analysis": "自动候选分析",
+        "auto_review": "自动候选复核",
+    }.get(job_name, job_name)
+
+
+def auto_job_status_label(status: str) -> str:
+    return {
+        "success": "完成",
+        "skipped": "跳过",
+        "failed": "失败",
+    }.get(status, status)
 
 
 def list_conversations(session: Session, filters: ListFilters) -> dict[str, Any]:

@@ -8,6 +8,7 @@ from kaka_core.api.app import create_app
 from kaka_core.config.settings import get_settings
 from kaka_core.storage.database import create_session_factory, init_database
 from kaka_core.storage.models import (
+    AutoJobRunRecord,
     InputRecord,
     MemoryCandidateRecord,
     MemoryRecord,
@@ -35,6 +36,25 @@ def create_test_client(monkeypatch, tmp_path, *, local_only: str = "true", token
 
 def test_admin_summary_and_lists(monkeypatch, tmp_path):
     client = create_test_client(monkeypatch, tmp_path)
+    with create_session_factory()() as session:
+        session.add(
+            AutoJobRunRecord(
+                job_name="auto_analysis",
+                status="skipped",
+                reason="未达到触发门槛 50",
+                checked_count=3,
+                processed_runs=0,
+                inserted_count=0,
+                updated_count=0,
+                skipped_count=0,
+                error_count=0,
+                extra_metadata={},
+                started_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        session.commit()
 
     summary = client.get("/admin/api/summary")
     candidates = client.get("/admin/api/candidates", params={"status": "pending"})
@@ -43,6 +63,8 @@ def test_admin_summary_and_lists(monkeypatch, tmp_path):
 
     assert summary.status_code == 200
     assert summary.json()["counts"]["pending_candidates"] == 1
+    assert summary.json()["recent_auto_job_runs"][0]["job_name"] == "auto_analysis"
+    assert summary.json()["recent_auto_job_runs"][0]["status"] == "skipped"
     assert candidates.status_code == 200
     assert candidates.json()["items"][0]["candidate_memory"] == "用户正在开发卡咔。"
     assert memories.status_code == 200

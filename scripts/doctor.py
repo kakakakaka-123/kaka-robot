@@ -12,6 +12,7 @@ PyCharm 右键运行即可，不需要配置 Parameters。
 - `.env` / `.env.example` / `.gitignore`。
 - LLM、数据库和 qq-adapter 的配置字段形状。
 - SQLite 表结构、废弃字段、字段顺序、记忆候选表和正式记忆表。
+- 自动后台任务运行记录表。
 - 自动候选区复核配置、回复时长期记忆注入配置、人设 Prompt 配置和关系上下文配置。
 - 本地 Web 管理台访问保护配置。
 - 项目内关键模块是否能导入。
@@ -92,6 +93,23 @@ EXPECTED_MEMORY_COLUMNS = [
     "merge_reason",
     "created_at",
     "updated_at",
+]
+EXPECTED_AUTO_JOB_RUN_COLUMNS = [
+    "id",
+    "job_name",
+    "status",
+    "reason",
+    "checked_count",
+    "processed_runs",
+    "inserted_count",
+    "updated_count",
+    "skipped_count",
+    "error_count",
+    "error_message",
+    "metadata",
+    "started_at",
+    "finished_at",
+    "created_at",
 ]
 
 
@@ -553,6 +571,10 @@ def check_sqlite_schema(results: list[CheckResult], db_path: Path) -> None:
                 str(row[1])
                 for row in conn.execute("PRAGMA table_info(memories)").fetchall()
             ]
+            ordered_auto_job_run_columns = [
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(auto_job_runs)").fetchall()
+            ]
     except sqlite3.Error as exc:
         fail(results, "SQLite 文件", f"无法打开: {exc}")
         return
@@ -580,6 +602,15 @@ def check_sqlite_schema(results: list[CheckResult], db_path: Path) -> None:
             results,
             "memories 表",
             "尚不存在；启动 kaka-core 或运行合并脚本初始化数据库后会自动创建",
+        )
+
+    if "auto_job_runs" in table_names:
+        ok(results, "auto_job_runs 表", "存在")
+    else:
+        warn(
+            results,
+            "auto_job_runs 表",
+            "尚不存在；启动 kaka-core 初始化数据库后会自动创建",
         )
 
     if "inputs" not in table_names:
@@ -657,6 +688,18 @@ def check_sqlite_schema(results: list[CheckResult], db_path: Path) -> None:
         warn(
             results,
             "memories 字段顺序",
+            "当前顺序与模型不一致；启动 kaka-core 后会自动整理",
+        )
+
+    if "auto_job_runs" not in table_names:
+        return
+
+    if ordered_auto_job_run_columns == EXPECTED_AUTO_JOB_RUN_COLUMNS:
+        ok(results, "auto_job_runs 字段顺序", "符合当前模型")
+    else:
+        warn(
+            results,
+            "auto_job_runs 字段顺序",
             "当前顺序与模型不一致；启动 kaka-core 后会自动整理",
         )
 

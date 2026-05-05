@@ -4,6 +4,7 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import sessionmaker
 
 from kaka_core.storage.database import (
+    EXPECTED_AUTO_JOB_RUN_COLUMNS,
     EXPECTED_INPUT_COLUMNS,
     EXPECTED_MEMORY_CANDIDATE_COLUMNS,
     EXPECTED_MEMORY_COLUMNS,
@@ -74,6 +75,7 @@ def test_init_database_migrates_legacy_messages_and_responses(tmp_path) -> None:
     assert "inputs" in inspector.get_table_names()
     assert "outputs" in inspector.get_table_names()
     assert "event_processing_locks" in inspector.get_table_names()
+    assert "auto_job_runs" in inspector.get_table_names()
     assert "memory_candidates" in inspector.get_table_names()
     assert "memories" in inspector.get_table_names()
     assert "messages" not in inspector.get_table_names()
@@ -126,6 +128,7 @@ def test_init_database_migrates_legacy_messages_and_responses(tmp_path) -> None:
         "merge_reason",
     }.issubset(memory_columns)
     assert [column["name"] for column in inspector.get_columns("memories")] == EXPECTED_MEMORY_COLUMNS
+    assert [column["name"] for column in inspector.get_columns("auto_job_runs")] == EXPECTED_AUTO_JOB_RUN_COLUMNS
 
 
 def test_event_processing_lock_is_single_owner(tmp_path) -> None:

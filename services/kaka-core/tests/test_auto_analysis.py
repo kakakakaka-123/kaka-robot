@@ -2,12 +2,13 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from kaka_core.config.settings import MemoryAnalysisSettings
 from kaka_core.memory import auto_analysis
-from kaka_core.storage.models import InputRecord, SceneRecord, UserRecord, utc_now
+from kaka_core.memory import auto_jobs
+from kaka_core.storage.models import AutoJobRunRecord, Base, InputRecord, SceneRecord, UserRecord, utc_now
 
 
 def test_seconds_until_next_hour():
@@ -61,6 +62,8 @@ async def test_auto_analysis_skips_below_threshold(monkeypatch):
 
     monkeypatch.setattr(auto_analysis, "init_database", lambda: None)
     monkeypatch.setattr(auto_analysis, "create_session_factory", lambda: session_factory)
+    monkeypatch.setattr(auto_jobs, "init_database", lambda: None)
+    monkeypatch.setattr(auto_jobs, "create_session_factory", lambda: session_factory)
 
     summary = await auto_analysis.run_auto_analysis_check(
         MemoryAnalysisSettings(
@@ -75,6 +78,39 @@ async def test_auto_analysis_skips_below_threshold(monkeypatch):
     assert summary.ran is False
     assert summary.checked_count == 49
     assert "未达到触发门槛" in summary.reason
+
+
+@pytest.mark.anyio
+async def test_auto_analysis_check_and_record_writes_skipped_run(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    seed_inputs(session_factory, 3)
+
+    monkeypatch.setattr(auto_analysis, "init_database", lambda: None)
+    monkeypatch.setattr(auto_analysis, "create_session_factory", lambda: session_factory)
+    monkeypatch.setattr(auto_jobs, "init_database", lambda: None)
+    monkeypatch.setattr(auto_jobs, "create_session_factory", lambda: session_factory)
+
+    summary = await auto_analysis.run_auto_analysis_check_and_record(
+        MemoryAnalysisSettings(
+            enabled=True,
+            trigger_count=50,
+            batch_limit=50,
+            max_runs_per_check=2,
+            interval_seconds=0,
+        )
+    )
+
+    with session_factory() as session:
+        run = session.scalar(select(AutoJobRunRecord))
+
+    assert summary.ran is False
+    assert run is not None
+    assert run.job_name == "auto_analysis"
+    assert run.status == "skipped"
+    assert run.checked_count == 3
+    assert run.processed_runs == 0
 
 
 @pytest.mark.anyio

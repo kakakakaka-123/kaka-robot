@@ -12,8 +12,17 @@ from sqlalchemy import func, select
 
 from kaka_core.config.settings import MemoryAnalysisSettings, get_settings
 from kaka_core.llm.router import LLMRouter
+from kaka_core.memory.auto_jobs import (
+    AUTO_JOB_STATUS_FAILED,
+    AUTO_JOB_STATUS_SKIPPED,
+    AUTO_JOB_STATUS_SUCCESS,
+    AutoJobRunData,
+    record_auto_job_run_safely,
+)
 from kaka_core.storage.database import create_session_factory, init_database
-from kaka_core.storage.models import InputRecord
+from kaka_core.storage.models import InputRecord, utc_now
+
+AUTO_ANALYSIS_JOB_NAME = "auto_analysis"
 
 
 @dataclass
@@ -74,7 +83,7 @@ class AutoAnalysisScheduler:
 
             async with self.lock:
                 try:
-                    summary = await run_auto_analysis_check(self.settings)
+                    summary = await run_auto_analysis_check_and_record(self.settings)
                     print(format_auto_analysis_summary(summary))
                 except Exception as exc:  # noqa: BLE001
                     print(f"自动记忆候选分析失败：{exc}")
@@ -170,6 +179,62 @@ async def run_auto_analysis_check(
         summary.ran = False
         summary.reason = "没有可处理记录"
     return summary
+
+
+async def run_auto_analysis_check_and_record(
+    settings: MemoryAnalysisSettings | None = None,
+) -> AutoAnalysisRunSummary:
+    started_at = utc_now()
+    try:
+        summary = await run_auto_analysis_check(settings)
+    except Exception as exc:
+        finished_at = utc_now()
+        record_error = record_auto_job_run_safely(
+            AutoJobRunData(
+                job_name=AUTO_ANALYSIS_JOB_NAME,
+                status=AUTO_JOB_STATUS_FAILED,
+                reason="执行异常",
+                error_count=1,
+                error_message=str(exc),
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+        )
+        if record_error:
+            print(f"自动记忆候选分析运行记录写入失败：{record_error}")
+        raise
+
+    finished_at = utc_now()
+    record_error = record_auto_job_run_safely(
+        auto_analysis_summary_to_job_run(summary, started_at, finished_at)
+    )
+    if record_error:
+        print(f"自动记忆候选分析运行记录写入失败：{record_error}")
+    return summary
+
+
+def auto_analysis_summary_to_job_run(
+    summary: AutoAnalysisRunSummary,
+    started_at: datetime,
+    finished_at: datetime,
+) -> AutoJobRunData:
+    return AutoJobRunData(
+        job_name=AUTO_ANALYSIS_JOB_NAME,
+        status=AUTO_JOB_STATUS_SUCCESS if summary.ran else AUTO_JOB_STATUS_SKIPPED,
+        reason=summary.reason,
+        checked_count=summary.checked_count,
+        processed_runs=summary.processed_runs,
+        inserted_count=summary.candidates_inserted,
+        updated_count=summary.analyzed_marked,
+        skipped_count=summary.skipped_marked,
+        error_count=summary.llm_errors_left_unprocessed + summary.missing_llm_results,
+        metadata={
+            "llm_errors_left_unprocessed": summary.llm_errors_left_unprocessed,
+            "missing_llm_results": summary.missing_llm_results,
+        },
+        started_at=started_at,
+        finished_at=finished_at,
+    )
 
 
 def count_not_analyzed_inputs(session) -> int:

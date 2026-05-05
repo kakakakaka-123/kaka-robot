@@ -9,8 +9,10 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from kaka_core.config.settings import MemoryReviewSettings
+from kaka_core.memory import auto_jobs
 from kaka_core.memory import auto_review
 from kaka_core.storage.models import (
+    AutoJobRunRecord,
     Base,
     InputRecord,
     MemoryCandidateRecord,
@@ -48,6 +50,8 @@ async def test_auto_review_skips_below_threshold(monkeypatch):
 
     monkeypatch.setattr(auto_review, "init_database", lambda: None)
     monkeypatch.setattr(auto_review, "create_session_factory", lambda: session_factory)
+    monkeypatch.setattr(auto_jobs, "init_database", lambda: None)
+    monkeypatch.setattr(auto_jobs, "create_session_factory", lambda: session_factory)
 
     summary = await auto_review.run_auto_review_check(
         MemoryReviewSettings(
@@ -61,6 +65,36 @@ async def test_auto_review_skips_below_threshold(monkeypatch):
     assert summary.ran is False
     assert summary.checked_count == 19
     assert "未达到触发门槛" in summary.reason
+
+
+@pytest.mark.anyio
+async def test_auto_review_check_and_record_writes_skipped_run(monkeypatch):
+    session_factory = create_session_factory()
+    seed_candidates(session_factory, 3)
+
+    monkeypatch.setattr(auto_review, "init_database", lambda: None)
+    monkeypatch.setattr(auto_review, "create_session_factory", lambda: session_factory)
+    monkeypatch.setattr(auto_jobs, "init_database", lambda: None)
+    monkeypatch.setattr(auto_jobs, "create_session_factory", lambda: session_factory)
+
+    summary = await auto_review.run_auto_review_check_and_record(
+        MemoryReviewSettings(
+            enabled=True,
+            trigger_count=20,
+            batch_size=10,
+            max_runs_per_check=2,
+        )
+    )
+
+    with session_factory() as session:
+        run = session.scalar(select(AutoJobRunRecord))
+
+    assert summary.ran is False
+    assert run is not None
+    assert run.job_name == "auto_review"
+    assert run.status == "skipped"
+    assert run.checked_count == 3
+    assert run.processed_runs == 0
 
 
 @pytest.mark.anyio
