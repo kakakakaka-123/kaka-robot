@@ -214,6 +214,7 @@ async def generate_chat_response(
                 settings.memory_reply,
                 settings.short_context,
                 settings.relationship,
+                settings.persona,
             )
 
             try:

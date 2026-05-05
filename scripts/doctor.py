@@ -12,7 +12,7 @@ PyCharm 右键运行即可，不需要配置 Parameters。
 - `.env` / `.env.example` / `.gitignore`。
 - LLM、数据库和 qq-adapter 的配置字段形状。
 - SQLite 表结构、废弃字段、字段顺序、记忆候选表和正式记忆表。
-- 自动候选区复核配置、回复时长期记忆注入配置和关系上下文配置。
+- 自动候选区复核配置、回复时长期记忆注入配置、人设 Prompt 配置和关系上下文配置。
 - 本地 Web 管理台访问保护配置。
 - 项目内关键模块是否能导入。
 - 8001 / 8081 / 8000 端口状态。
@@ -152,6 +152,7 @@ def check_project_layout(results: list[CheckResult]) -> None:
         ROOT / "packages" / "kaka-protocol",
         ROOT / "services" / "kaka-core",
         ROOT / "apps" / "qq-adapter",
+        ROOT / "prompts" / "kaka_persona.md",
         ROOT / "docs" / "运行手册.md",
         ROOT / "services" / "kaka-core" / "run.py",
         ROOT / "apps" / "qq-adapter" / "bot.py",
@@ -293,6 +294,10 @@ def check_env_file(results: list[CheckResult]) -> dict[str, str]:
         results,
         "MEMORY_REPLY_POOL_SIZE",
         values.get("MEMORY_REPLY_POOL_SIZE", "300"),
+    )
+    check_persona_prompt_path(
+        results,
+        values.get("KAKA_PERSONA_PROMPT_PATH", str(ROOT / "prompts" / "kaka_persona.md")),
     )
     owner_ids = values.get("KAKA_OWNER_USER_IDS", "").strip()
     if owner_ids:
@@ -463,6 +468,40 @@ def check_database_url(results: list[CheckResult], database_url: str | None) -> 
         check_sqlite_schema(results, db_path)
     else:
         warn(results, "SQLite 文件", f"尚不存在，kaka-core 启动时会创建: {db_path}")
+
+
+def check_persona_prompt_path(results: list[CheckResult], value: str) -> None:
+    raw_path = str(value or "").strip()
+    if not raw_path:
+        fail(results, "KAKA_PERSONA_PROMPT_PATH", "不能为空")
+        return
+
+    prompt_path = Path(raw_path)
+    if not prompt_path.is_absolute():
+        prompt_path = ROOT / prompt_path
+
+    if not prompt_path.exists():
+        warn(
+            results,
+            "KAKA_PERSONA_PROMPT_PATH",
+            f"文件不存在，将回退到内置基础人设: {prompt_path}",
+        )
+        return
+
+    if not prompt_path.is_file():
+        fail(results, "KAKA_PERSONA_PROMPT_PATH", f"不是文件: {prompt_path}")
+        return
+
+    try:
+        content = prompt_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        fail(results, "KAKA_PERSONA_PROMPT_PATH", f"无法读取: {exc}")
+        return
+
+    if content:
+        ok(results, "KAKA_PERSONA_PROMPT_PATH", f"可读取: {prompt_path}")
+    else:
+        warn(results, "KAKA_PERSONA_PROMPT_PATH", f"文件为空，将回退到内置基础人设: {prompt_path}")
 
 
 def is_directory_writable(path: Path) -> bool:

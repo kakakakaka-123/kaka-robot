@@ -77,6 +77,72 @@ async def test_generate_chat_response_uses_router_when_llm_enabled(monkeypatch, 
 
 
 @pytest.mark.anyio
+async def test_generate_chat_response_uses_persona_prompt_file(monkeypatch, tmp_path) -> None:
+    database_url = f"sqlite:///{tmp_path / 'persona-file-test.sqlite3'}"
+    persona_path = tmp_path / "persona.md"
+    persona_path.write_text("你是测试文件里的卡咔。", encoding="utf-8")
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("LLM_ENABLED", "true")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("KAKA_PERSONA_PROMPT_PATH", str(persona_path))
+    get_settings.cache_clear()
+
+    router = FakeRouter()
+    response = await generate_chat_response(make_event(), router=router)
+
+    assert router.messages[0].content.startswith("你是测试文件里的卡咔。")
+    assert response.metadata["persona_prompt_source"] == "file"
+    assert response.metadata["persona_prompt_path"] == str(persona_path)
+    assert response.metadata["persona_prompt_fallback_used"] is False
+    assert "persona_prompt_error" not in response.metadata
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_generate_chat_response_falls_back_when_persona_file_missing(monkeypatch, tmp_path) -> None:
+    database_url = f"sqlite:///{tmp_path / 'persona-missing-test.sqlite3'}"
+    persona_path = tmp_path / "missing-persona.md"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("LLM_ENABLED", "true")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("KAKA_PERSONA_PROMPT_PATH", str(persona_path))
+    get_settings.cache_clear()
+
+    router = FakeRouter()
+    response = await generate_chat_response(make_event(), router=router)
+
+    assert "你是卡咔" in router.messages[0].content
+    assert response.metadata["persona_prompt_source"] == "default"
+    assert response.metadata["persona_prompt_path"] == str(persona_path)
+    assert response.metadata["persona_prompt_fallback_used"] is True
+    assert response.metadata["persona_prompt_error"]
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_generate_chat_response_resolves_relative_persona_path_from_repo_root(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'persona-relative-test.sqlite3'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("LLM_ENABLED", "true")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("KAKA_PERSONA_PROMPT_PATH", "prompts/kaka_persona.md")
+    monkeypatch.chdir(tmp_path)
+    get_settings.cache_clear()
+
+    router = FakeRouter()
+    response = await generate_chat_response(make_event(), router=router)
+
+    assert response.metadata["persona_prompt_source"] == "file"
+    assert response.metadata["persona_prompt_path"].endswith("prompts\\kaka_persona.md")
+    assert response.metadata["persona_prompt_fallback_used"] is False
+    assert "persona_prompt_error" not in response.metadata
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
 async def test_generate_chat_response_injects_relevant_memories(monkeypatch, tmp_path) -> None:
     database_url = f"sqlite:///{tmp_path / 'memory-injection-test.sqlite3'}"
     monkeypatch.setenv("DATABASE_URL", database_url)

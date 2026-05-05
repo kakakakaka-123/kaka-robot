@@ -50,6 +50,13 @@ def _get_csv_set(name: str) -> frozenset[str]:
     return frozenset(item for item in items if item)
 
 
+def _resolve_path(value: str, *, base_dir: Path) -> Path:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    return base_dir / path
+
+
 @dataclass(frozen=True)
 class DatabaseSettings:
     """数据库配置。
@@ -140,6 +147,13 @@ class RelationshipSettings:
 
 
 @dataclass(frozen=True)
+class PersonaSettings:
+    """回复时基础人设 Prompt 配置。"""
+
+    prompt_path: Path
+
+
+@dataclass(frozen=True)
 class AdminSettings:
     """本地管理台访问保护配置。"""
 
@@ -158,6 +172,7 @@ class Settings:
     memory_reply: MemoryReplySettings
     short_context: ShortContextSettings
     relationship: RelationshipSettings
+    persona: PersonaSettings
     admin: AdminSettings
 
 
@@ -172,6 +187,11 @@ def get_settings() -> Settings:
     current_file = Path(__file__).resolve()
     repo_root = current_file.parents[5]
     default_database_url = f"sqlite:///{repo_root / 'data' / 'kaka.sqlite3'}"
+    default_persona_prompt_path = repo_root / "prompts" / "kaka_persona.md"
+    persona_prompt_path = _resolve_path(
+        os.getenv("KAKA_PERSONA_PROMPT_PATH", str(default_persona_prompt_path)),
+        base_dir=repo_root,
+    )
 
     return Settings(
         database=DatabaseSettings(
@@ -222,6 +242,9 @@ def get_settings() -> Settings:
             regular_recent_input_count=_get_int("RELATIONSHIP_REGULAR_RECENT_INPUT_COUNT", 10),
             regular_active_memory_count=_get_int("RELATIONSHIP_REGULAR_ACTIVE_MEMORY_COUNT", 3),
             recent_days=_get_int("RELATIONSHIP_RECENT_DAYS", 7),
+        ),
+        persona=PersonaSettings(
+            prompt_path=persona_prompt_path,
         ),
         admin=AdminSettings(
             local_only=_get_bool("ADMIN_LOCAL_ONLY", True),

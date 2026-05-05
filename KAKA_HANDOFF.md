@@ -40,6 +40,8 @@ D:\Python\AgentRobot\kaka-v2
 -> 正式记忆分页、归档、恢复、硬删除、新增和编辑
 -> 回复检索和回复上下文预览
 -> 回复前短期上下文注入
+-> 回复前关系上下文注入
+-> 基础人设 Prompt 文件化
 ```
 
 当前真实状态：
@@ -79,6 +81,7 @@ D:\Python\AgentRobot\kaka-v2
 - 正式记忆页按 `memories.id` 稳定升序显示，支持每页 50 条分页、`active / archived / all` 切换、新增、编辑、归档、恢复和确认后的硬删除；危险写库动作都有确认弹窗。
 - 手动新增正式记忆会写入 `source="manual"`，默认 `merge_reason="手动新增"`；编辑会同步更新 `memory_text / normalized_text / memory_type / confidence / source_text / status / merge_reason`，也可调整用户和群/私聊场景。
 - 回复检索页会同时请求正式记忆检索和回复上下文预览，展示 System Prompt、User Prompt、metadata、`used_memory_ids` 和命中数量，方便确认真实回复前会给模型什么上下文。
+- 基础人设 Prompt 已从代码拆到 `prompts/kaka_persona.md`；`KAKA_PERSONA_PROMPT_PATH` 可改路径，文件缺失或为空时回退到内置基础人设；metadata 会记录 `persona_prompt_source / persona_prompt_path / persona_prompt_fallback_used`。
 - 已接入第一版短期上下文：回复前从同场景最近输入和输出中读取上下文，默认只看最近 30 分钟，最多 20 条输入记录、总计 1200 字，排除当前消息；metadata 会记录 `short_context_enabled / short_context_count / short_context_input_ids`。
 - 已接入第一版关系上下文：通过 `KAKA_OWNER_USER_IDS`、历史输入数、最近 7 天输入数和 active 正式记忆数，把当前说话者粗分为 `owner / familiar / regular / stranger`；阈值为 familiar：历史输入 >=100 或最近 7 天 >=30 或 active 记忆 >=8，regular：历史输入 >=30 或最近 7 天 >=10 或 active 记忆 >=3；metadata 会记录 `relationship_level / relationship_is_owner / relationship_input_count / relationship_recent_input_count / relationship_active_memory_count`。这不是好感度系统，不维护亲密分数。
 - 脚本现在定位为开发、测试、排查和应急备用入口；用户日常管理优先使用网页。
@@ -88,9 +91,9 @@ D:\Python\AgentRobot\kaka-v2
 
 ```text
 kaka-protocol：5 passed（历史完整测试记录）
-kaka-core：97 passed
+kaka-core：109 passed
 qq-adapter：18 passed（历史完整测试记录）
-doctor：56 OK, 3 WARN, 0 FAIL
+doctor：70 OK, 1 WARN, 0 FAIL
 web-console：npm run build passed
 2026-05-05 正式记忆 CRUD/分页和短期上下文相关针对性测试：36 passed
 2026-05-05 web-console：npm run build passed
@@ -137,6 +140,7 @@ memory_candidates.id=42 -> approved -> rejected -> approved
 QQ 发一句话
 -> qq-adapter 收到
 -> 转成 MessageEvent
+-> kaka-core 读取基础人设 Prompt 文件
 -> kaka-core 回复前检索少量 active 长期记忆并组装 prompt，或只观察记录
 -> kaka-core 回复前读取同场景最近 30 分钟内最多 20 条短期上下文
 -> kaka-core 回复前注入粗略关系上下文，区分主人、熟人、普通熟悉群友和陌生人

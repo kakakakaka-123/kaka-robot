@@ -522,6 +522,7 @@ def preview_reply_context(
         settings.memory_reply,
         settings.short_context,
         settings.relationship,
+        settings.persona,
     )
     messages = [
         {

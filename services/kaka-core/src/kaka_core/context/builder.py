@@ -2,25 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from kaka_core.config.settings import MemoryReplySettings, RelationshipSettings, ShortContextSettings
+from kaka_core.config.settings import (
+    MemoryReplySettings,
+    PersonaSettings,
+    RelationshipSettings,
+    ShortContextSettings,
+)
 from kaka_core.context.recent import ShortContextItem, format_short_context, load_short_context
 from kaka_core.llm.client import ChatMessage
 from kaka_core.memory.search import MemorySearchFilters, MemorySearchResult, search_user_memories
+from kaka_core.persona.prompt import PersonaPrompt, load_persona_prompt
 from kaka_core.relationship.context import RelationshipContext, load_relationship_context
 from kaka_core.storage.database import create_session_factory, init_database
 from kaka_protocol import MessageEvent
-
-
-SYSTEM_PROMPT = """你是卡咔，一个正在成长中的 AI 人格体。
-当前阶段你只需要完成自然、简洁的文字回复。
-
-基础表达规则：
-- 使用中文。
-- 不要自称助手。
-- 不要过度卖萌。
-- 不要滥用 emoji。
-- 回复要自然，像正在认真听对方说话。
-"""
 
 
 @dataclass(frozen=True)
@@ -36,6 +30,7 @@ class ReplyContext:
     memories: tuple[MemorySearchResult, ...] = ()
     short_context: tuple[ShortContextItem, ...] = ()
     relationship: RelationshipContext | None = None
+    persona: PersonaPrompt | None = None
 
 
 def build_reply_context(
@@ -43,6 +38,7 @@ def build_reply_context(
     memory_settings: MemoryReplySettings,
     short_context_settings: ShortContextSettings,
     relationship_settings: RelationshipSettings,
+    persona_settings: PersonaSettings,
 ) -> ReplyContext:
     """组装聊天模型输入。
 
@@ -51,6 +47,7 @@ def build_reply_context(
     """
 
     user_text = event.content.text or ""
+    persona_prompt = load_persona_prompt(persona_settings)
     memory_results, memory_metadata = load_memory_context(event, user_text, memory_settings)
     short_context_items, short_context_metadata = load_short_context_safely(
         event,
@@ -63,13 +60,23 @@ def build_reply_context(
     )
 
     speaker_name = event.display_name or event.user_id
-    system_prompt = build_system_prompt(memory_results, speaker_name, relationship_context)
+    system_prompt = build_system_prompt(
+        persona_prompt,
+        memory_results,
+        speaker_name,
+        relationship_context,
+    )
     user_prompt = build_user_prompt(event, user_text, short_context_items)
     metadata: dict[str, object] = {
+        "persona_prompt_source": persona_prompt.source,
+        "persona_prompt_path": persona_prompt.path,
+        "persona_prompt_fallback_used": persona_prompt.fallback_used,
         "memory_injection_enabled": memory_settings.enabled,
         "memory_count": len(memory_results),
         "used_memory_ids": [result.memory.id for result in memory_results],
     }
+    if persona_prompt.error:
+        metadata["persona_prompt_error"] = persona_prompt.error
     metadata.update(memory_metadata)
     metadata.update(short_context_metadata)
     metadata.update(relationship_metadata)
@@ -83,6 +90,7 @@ def build_reply_context(
         memories=tuple(memory_results),
         short_context=tuple(short_context_items),
         relationship=relationship_context,
+        persona=persona_prompt,
     )
 
 
@@ -187,11 +195,12 @@ def load_relationship_context_safely(
 
 
 def build_system_prompt(
+    persona_prompt: PersonaPrompt,
     memory_results: list[MemorySearchResult],
     speaker_name: str,
     relationship: RelationshipContext | None,
 ) -> str:
-    lines = [SYSTEM_PROMPT.rstrip()]
+    lines = [persona_prompt.content.rstrip()]
     if relationship is not None:
         lines.extend(build_relationship_prompt_lines(relationship, speaker_name))
     if not memory_results:

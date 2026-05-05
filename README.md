@@ -97,6 +97,7 @@ QQ 收到消息
 - 正式记忆检索预览脚本：`search_memories.py` 可按当前用户和当前消息，只读预览会命中的少量正式记忆。
 - 本地 Web 管理台：启动 `kaka-core` 后打开 `http://127.0.0.1:8001/admin`；当前 Web 界面保留总览、正式记忆、回复检索预览、运行状态和预留扩展入口。正式记忆页支持按 ID 稳定排序、每页 50 条分页、新增、编辑、归档、恢复和确认后硬删除；最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，但不再作为日常 Web 页面暴露。
 - 管理 API：`/admin/api/*`，默认只允许本机访问；如果设置 `ADMIN_LOCAL_ONLY=false`，必须配置 `ADMIN_API_TOKEN` 并在请求头传 `X-Kaka-Admin-Token`。Web 管理台顶部的“管理 Token”输入框会把 token 暂存在当前浏览器会话里并自动带到 API 请求里。核心代码在 `services/kaka-core/src/kaka_core/api/admin_routes.py` 和 `services/kaka-core/src/kaka_core/admin/service.py`；总览里展示的数据库连接串会自动脱敏。后续面向用户的数据管理功能优先扩展这里。
+- 基础人设 Prompt 文件：`prompts/kaka_persona.md` 会作为回复时 System Prompt 的基础层；关系上下文和长期记忆会在它之后动态追加。路径可用 `KAKA_PERSONA_PROMPT_PATH` 调整，文件缺失时会回退到内置基础人设。
 - 回复前关系上下文：`kaka-core` 会用 `KAKA_OWNER_USER_IDS`、历史输入数、最近 7 天输入数和 active 正式记忆数，把当前说话者粗分为 `owner / familiar / regular / stranger`。这不是好感度系统，只用于让卡咔不把主人当陌生人，也不对新人装熟。
 - 长期记忆 E2E 测试造数脚本：`seed_memory_e2e_data.py` 只用于本地测试，默认预览，加 `--apply` 才写入测试输入。
 - 程序内置自动候选分析：可选开启后，`kaka-core` 在下一个整点及之后每个整点检查一次；`not_analyzed >= 50` 时最多处理两轮，每轮 50 条。
@@ -237,6 +238,7 @@ kaka-v2/
 -> 本地 Web 管理台 /admin
 -> 正式记忆分页、新增和编辑
 -> 回复上下文预览
+-> 基础人设 prompt 文件化
 -> 配置模板和本地自检
 ```
 
@@ -249,16 +251,17 @@ inputs / outputs 记录正常
 最近对话筛选查看正常
 ```
 
-当前已经完成“回复时读取正式长期记忆”的第一版接入：`search_memories.py` 的检索逻辑已经抽成正式模块，`kaka-core` 回复前会按当前用户、场景和消息检索少量 `active` 记忆，并把命中的记忆作为可参考背景放进模型 prompt。当前也已接入第一版短期上下文，默认读取同场景最近 30 分钟内最多 20 条输入记录，总字符上限 1200，排除当前消息。回复前还会注入第一版关系上下文，按主人、熟人、普通熟悉群友和陌生人粗分表达边界。长期记忆、短期上下文和关系阈值都可通过 `.env` 调整。程序里也已经内置自动候选分析和自动候选区复核，两者都在整点触发。
+当前已经完成“回复时读取正式长期记忆”的第一版接入：`search_memories.py` 的检索逻辑已经抽成正式模块，`kaka-core` 回复前会按当前用户、场景和消息检索少量 `active` 记忆，并把命中的记忆作为可参考背景放进模型 prompt。当前也已接入第一版短期上下文，默认读取同场景最近 30 分钟内最多 20 条输入记录，总字符上限 1200，排除当前消息。回复前还会注入第一版关系上下文，按主人、熟人、普通熟悉群友和陌生人粗分表达边界。基础人设已经从代码拆到 `prompts/kaka_persona.md`，后续正式写人设时优先改这个文件。长期记忆、短期上下文、关系阈值和人设路径都可通过 `.env` 调整。程序里也已经内置自动候选分析和自动候选区复核，两者都在整点触发。
 
 当前也已经完成本地 Web 管理台第一版接入。用户日常查看总览、管理正式记忆、预览回复检索和检查运行状态，优先使用 `/admin`；正式记忆可以在页面内新增、编辑、归档、恢复和删除。最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，Python 脚本主要留给开发、测试、批量修复和应急排查。
 
 当前回复记忆接入规则：
 
 1. 默认最多取 5 条高分 `active` 记忆。
-2. 默认最多取最近 30 分钟内 8 条同场景短期上下文。
-3. 记忆和短期上下文只是背景，不强迫模型主动提起或机械复述。
-4. 响应 metadata 会记录 `used_memory_ids`、`memory_count`、`memory_injection_enabled`、`short_context_input_ids`、`short_context_count`、`relationship_level`、`relationship_is_owner` 和关系计数。
-5. 后续情绪、用户画像和更细关系维度应继续接入 `kaka_core.context.builder`，不要散落在聊天服务里。
+2. 默认最多取最近 30 分钟内 20 条同场景短期上下文。
+3. 基础人设来自 `prompts/kaka_persona.md`，动态关系和记忆会追加在后面。
+4. 记忆和短期上下文只是背景，不强迫模型主动提起或机械复述。
+5. 响应 metadata 会记录 `persona_prompt_source`、`used_memory_ids`、`memory_count`、`memory_injection_enabled`、`short_context_input_ids`、`short_context_count`、`relationship_level`、`relationship_is_owner` 和关系计数。
+6. 后续情绪、用户画像和更细关系维度应继续接入 `kaka_core.context.builder`，不要散落在聊天服务里。
 
 当前暂时不要做图片、表情包、语音和复杂主动行为。先保证文本闭环、原始记录和开发工具长期稳定。

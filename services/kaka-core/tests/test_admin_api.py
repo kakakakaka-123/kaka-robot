@@ -185,6 +185,9 @@ def test_admin_search_memories(monkeypatch, tmp_path):
 
 
 def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path):
+    persona_path = tmp_path / "preview-persona.md"
+    persona_path.write_text("你是管理台预览里的卡咔。", encoding="utf-8")
+    monkeypatch.setenv("KAKA_PERSONA_PROMPT_PATH", str(persona_path))
     client = create_test_client(monkeypatch, tmp_path)
     with create_session_factory()() as session:
         input_record = session.scalar(select(InputRecord))
@@ -208,6 +211,7 @@ def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path)
     assert data["memory_count"] == 1
     assert data["used_memory_ids"] == [1]
     assert data["messages"][0]["role"] == "system"
+    assert data["messages"][0]["content"].startswith("你是管理台预览里的卡咔。")
     assert "可参考的长期记忆" in data["messages"][0]["content"]
     assert "用户喜欢直接的回答。" in data["messages"][0]["content"]
     assert data["messages"][1]["role"] == "user"
@@ -218,6 +222,9 @@ def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path)
     assert data["metadata"]["short_context_count"] == 1
     assert data["metadata"]["short_context_input_ids"] == [1]
     assert data["metadata"]["relationship_level"] == "stranger"
+    assert data["metadata"]["persona_prompt_source"] == "file"
+    assert data["metadata"]["persona_prompt_path"] == str(persona_path)
+    assert data["metadata"]["persona_prompt_fallback_used"] is False
     assert data["metadata"]["relationship_input_count"] == 1
     assert "当前说话者关系" in data["messages"][0]["content"]
 
