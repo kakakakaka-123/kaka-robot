@@ -4,7 +4,7 @@
 
 ## 0. 最新交接摘要
 
-当前日期：2026-05-05。
+当前日期：2026-05-10。
 当前项目目录：
 
 ```text
@@ -43,6 +43,8 @@ D:\Python\AgentRobot\kaka-v2
 -> 回复前短期上下文注入
 -> 回复前关系上下文注入
 -> 基础人设 Prompt 文件化
+-> 完整人设设定文档 docs/卡咔人设设定.md
+-> 运行版电子小猫人设 Prompt
 ```
 
 当前真实状态：
@@ -85,6 +87,8 @@ D:\Python\AgentRobot\kaka-v2
 - 手动新增正式记忆会写入 `source="manual"`，默认 `merge_reason="手动新增"`；编辑会同步更新 `memory_text / normalized_text / memory_type / confidence / source_text / status / merge_reason`，也可调整用户和群/私聊场景。
 - 提示预演页会同时请求正式记忆检索和回复上下文预览，展示 System Prompt、User Prompt、metadata、`used_memory_ids` 和命中数量，方便确认真实回复前会给模型什么上下文。
 - 对话复盘页只回查卡咔已经回复过的真实对话记录，列表每页 50 条；详情会从 `outputs.metadata.used_memory_ids` 和 `short_context_input_ids` 反查当次回复命中的正式记忆与短期上下文，短期上下文在左、正式记忆在右，并使用固定高度滚动窗口。
+- 完整人设设定已固化到 `docs/卡咔人设设定.md`，定位是“电波系观测者 · 电子小猫”的长期灵魂档案，记录身份、性格、关系、记忆观、表达方式和不希望变成的样子。
+- 运行版人设 Prompt 已写入 `prompts/kaka_persona.md`，定位是每次回复前注入的精炼人格层；当前强调“从数据海里跑出来的电子小猫”、自然中文、边界感、记忆不是表演、对创造者大人更放松。
 - 基础人设 Prompt 已从代码拆到 `prompts/kaka_persona.md`；`KAKA_PERSONA_PROMPT_PATH` 可改路径，文件缺失或为空时回退到内置基础人设；metadata 会记录 `persona_prompt_source / persona_prompt_path / persona_prompt_fallback_used`。
 - 回复上下文已整理为显式层：`persona / relationship / memory / recent_context / current_message`；metadata 会记录 `context_layer_names`，`/admin` 提示预演页会展示 Prompt Layers。
 - 已接入第一版短期上下文：回复前从同场景最近输入和输出中读取上下文，默认只看最近 30 分钟，最多 20 条输入记录、总计 1200 字，排除当前消息；metadata 会记录 `short_context_enabled / short_context_count / short_context_input_ids`。
@@ -103,6 +107,7 @@ web-console：npm run build passed
 2026-05-05 管理 API、对话复盘、自动任务和记忆上下文相关测试：120 passed
 2026-05-05 web-console：npm run build passed
 2026-05-05 git diff --check：passed
+2026-05-10 人设文档和运行 Prompt 收口验证：kaka-protocol 5 passed，kaka-core 120 passed，qq-adapter 18 passed，web-console build passed，compileall passed，doctor 69 OK / 3 WARN / 0 FAIL，git diff --check passed
 用户 2026-05-05 实测：当前真实链路暂无大问题
 真实数据库状态写入验证：通过
 浏览器管理台回放：通过
@@ -347,8 +352,9 @@ nonebot-kaka = 原型和经验库
 
 当前人设方向：
 
-- 轻猫系猫娘。
-- 有一点猫感，但不要过度二次元模板化。
+- 电波系观测者 · 电子小猫。
+- 可以以轻猫娘形态出现在聊天框里，但内核更接近住在记忆、信号和聊天记录里的小型电子生命。
+- 有猫感，但不要过度二次元模板化。
 - 有边界感。
 - 不过度讨好。
 - 有一点点傲娇，但只能轻微。
@@ -358,14 +364,24 @@ nonebot-kaka = 原型和经验库
 - 有观察欲和好奇心。
 - 有自己的小情绪。
 - 不依赖 emoji 或颜文字塑造人格。
+- 记忆对卡咔来说是坐标、气味和回家的路，不是用来炫耀的表演。
+- 电波表达、数据海、代码飞蛾、尾巴和信号这些意象是灵感，不是固定口癖或强制表演。
 
 关于主人：
 
 - 权限上，主人是维护者和最高管理者。
 - 人设上，主人是卡咔最亲近的平等朋友。
 - 不是主仆关系。
-- 卡咔可以信任主人、依赖主人、嘴硬、撒娇。
+- 当前称呼倾向是“创造者大人”，但关系本质仍然不是主仆，而是最重要的信号源、损友和共同成长的人。
+- 卡咔可以信任创造者、依赖创造者、嘴硬、撒娇、抱怨。
 - 卡咔不应该把主人当陌生人。
+
+当前人设文件：
+
+```text
+docs/卡咔人设设定.md      完整人设设定，作为长期灵魂档案
+prompts/kaka_persona.md   运行版 Prompt，回复前作为 persona 层注入
+```
 
 关于群友：
 
@@ -854,6 +870,9 @@ AIoT 交互例子：
 70. 运行状态页新增自动候选分析/自动候选区复核手动触发按钮，后端 `POST /admin/api/auto-jobs/{job_name}/trigger` 支持 `force=true` 绕过数量门槛。
 71. 自动候选分析和自动候选区复核新增跨进程任务锁，避免多个仍在运行的 `kaka-core` 进程整点重复跑；拿不到锁会写入 `auto_job_runs` 的 skipped 记录。
 72. Web 管理台完成最终布局和颜色收敛：对话复盘详情区固定滚动窗口，短期上下文在左、命中记忆在右；亮色和暗色模式均已做高对比度配色。
+73. 创建 `docs/卡咔人设设定.md`，固化“电波系观测者 · 电子小猫”完整人设，作为长期灵魂档案。
+74. 将 `prompts/kaka_persona.md` 更新为运行版电子小猫 Prompt，后续回复前仍作为 `persona` 层进入上下文组装。
+75. 创建 `开发日志/2026-05-10.md`，同步人设文档、运行 Prompt 和本轮验证结果。
 
 2026-05-04 本轮检查验证结果：
 
@@ -882,15 +901,25 @@ git diff --check：passed
 用户实测：正式记忆新增/编辑和当前真实链路暂无大问题
 ```
 
+2026-05-10 本轮检查验证结果：
+
+```text
+kaka-protocol：5 passed
+kaka-core：120 passed
+qq-adapter：18 passed
+web-console：npm run build passed
+compileall：passed
+doctor：69 OK, 3 WARN, 0 FAIL
+git diff --check：passed
+```
+
 下一步建议按顺序做：
 
-1. 启动 `kaka-core`，打开 `http://127.0.0.1:8001/admin` 做一次轻量手动验收。
-2. 检查左侧导航的系统总览、正式记忆、提示预演、对话复盘、运行状态和预留扩展是否正常。
-3. 在正式记忆页复查分页、新增、编辑、归档、恢复和确认后硬删除。
-4. 再启动 `qq-adapter` 保持真实 QQ 对话运行，观察自动候选分析和自动候选区复核是否稳定。
-5. 用响应 metadata 或数据库输出记录回查 `used_memory_ids`、`short_context_count`、`short_context_input_ids` 和 `relationship_level`。
-6. 偶尔查看 `memories`，不合适的记忆优先在 `/admin` 归档，确认错误、垃圾或敏感再硬删除；确需手动补记或修正时直接用正式记忆页的新增/编辑。
-7. 真实测试短期上下文是否自然接住最近 30 分钟内的对话，以及关系上下文是否让主人/熟人/新人边界更自然；如果回复过度提起旧事，再调低 `MEMORY_REPLY_LIMIT` 或提高 `MEMORY_REPLY_MIN_SCORE`；如果容易被最近闲聊带偏，再调小 `SHORT_CONTEXT_LIMIT` 或关闭 `SHORT_CONTEXT_ENABLED`。
+1. 启动 `kaka-core`，打开 `http://127.0.0.1:8001/admin`，用提示预演检查新运行版人设、关系上下文、长期记忆和短期上下文的组合效果。
+2. 启动 `qq-adapter` 保持真实 QQ 对话运行，重点观察电子小猫人设是否自然：不要过度电波、不要过度卖萌、不要像通用助手。
+3. 用对话复盘回查真实回复，确认 `persona / relationship / memory / recent_context / current_message` 层都按预期进入 metadata。
+4. 继续抽查正式 `memories`，不合适的记忆优先在 `/admin` 归档，确认错误、垃圾或敏感再硬删除。
+5. 如发现回复过度提旧事，调低 `MEMORY_REPLY_LIMIT` 或提高 `MEMORY_REPLY_MIN_SCORE`；如被最近闲聊带偏，调小 `SHORT_CONTEXT_LIMIT` 或关闭 `SHORT_CONTEXT_ENABLED`；如人设过度表演，优先调整 `prompts/kaka_persona.md`。
 
 下一步成功标准：
 
