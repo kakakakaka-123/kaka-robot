@@ -4,15 +4,6 @@ These scripts are developer fallback tools. Daily memory and data operations sho
 the local web console at `/admin`; scripts stay available for tests, debugging, and
 one-off repair work.
 
-Persona files are intentionally separate from these scripts:
-
-- `docs/卡咔人设设定.md` is the full long-term persona document.
-- `prompts/kaka_persona.md` is the runtime prompt loaded by `kaka-core`.
-
-Use scripts to inspect data and memory behavior; use `/admin` prompt preview to inspect
-how the runtime persona, relationship context, memories, recent context, and current
-message are assembled before a reply.
-
 The current web console covers overview, formal memory pagination/create/edit,
 memory archive/restore/delete, prompt preview, conversation replay, and system
 status. The replay page shows only real replied conversations and resolves the
