@@ -4,7 +4,7 @@
 
 ## 0. 最新交接摘要
 
-当前日期：2026-05-19。
+当前日期：2026-05-24。
 当前项目目录：
 
 ```text
@@ -43,6 +43,7 @@ D:\Python\AgentRobot\kaka-v2
 -> 回复前短期上下文注入
 -> 回复前关系上下文注入
 -> 基础人设 Prompt 文件化
+-> 运行版 Prompt 真实 LLM 回放调参
 ```
 
 当前真实状态：
@@ -91,6 +92,8 @@ D:\Python\AgentRobot\kaka-v2
 - 2026-05-23 已更新实际运行 Prompt `prompts/kaka_persona.md`：卡咔是一只从数据海里跑出来的电子猫娘，短回复，猫感，轻微电波，嘴硬心软，对创造者大人更信任和放松，创造者大人有最高摸头权限；长期记忆和短期上下文只在相关时自然使用。
 - 2026-05-23 已新增 `docs/卡咔场景反应样例.md`，当前包含 20 个典型小剧场样例，用作判断卡咔回复是否像卡咔的行为标尺，不会被程序直接读取。
 - 2026-05-23 已新增 `docs/卡咔负面情绪处理规则.md`，定位为“卖萌缓冲 / 陪住 / 挡一下情绪 / 不心理辅导”的风格规则；即使遇到很重的负面表达，卡咔也不切成心理辅导或安全客服，不在回复里写现实处理流程，而是保持统一猫感和陪伴风格。
+- 2026-05-24 已按用户允许，在真实 SQLite 数据库插入一批人设测试输入，并真实调用 DeepSeek 回放卡咔回复；测试前缀包括 `codex-persona-`、`codex-persona2-`、`codex-persona3-`、`codex-persona4-`、`codex-persona5-`，共 29 条，`inputs.id=9823..9851`，均已标记为 `analysis_status=skipped`，避免进入长期记忆候选分析。
+- 2026-05-24 已根据真实 LLM 输出微调 `prompts/kaka_persona.md`：补强普通群友摸头的“权限不足 / 临时访客认证 / 三个问题”反应，避免好感度协议；补强被叫 AI、创造者大人关系、负面情绪猫感缓冲、技术回答去客服化、记忆缺失时不说“我只认识现在的你”等约束。
 - 回复上下文已整理为显式层：`persona / relationship / memory / recent_context / current_message`；metadata 会记录 `context_layer_names`，`/admin` 提示预演页会展示 Prompt Layers。
 - 已接入第一版短期上下文：回复前从同场景最近输入和输出中读取上下文，默认只看最近 30 分钟，最多 20 条输入记录、总计 1200 字，排除当前消息；metadata 会记录 `short_context_enabled / short_context_count / short_context_input_ids`。
 - 已接入第一版关系上下文：通过 `KAKA_OWNER_USER_IDS`、历史输入数、最近 7 天输入数和 active 正式记忆数，把当前说话者粗分为 `owner / familiar / regular / stranger`；阈值为 familiar：历史输入 >=100 或最近 7 天 >=30 或 active 记忆 >=8，regular：历史输入 >=30 或最近 7 天 >=10 或 active 记忆 >=3；metadata 会记录 `relationship_level / relationship_is_owner / relationship_input_count / relationship_recent_input_count / relationship_active_memory_count`。这不是好感度系统，不维护亲密分数。
@@ -113,6 +116,7 @@ web-console：npm run build passed
 2026-05-19 compileall：passed
 2026-05-19 git diff --check：passed
 2026-05-23 人设运行 Prompt、场景样例和负面情绪规则：仅文档/Prompt 改动，未改 Python/前端代码，未重新跑全量测试
+2026-05-24 真实库人设回放：已真实调用 DeepSeek；无效编码轮和有效测试轮均已标记 skipped；仅调整 prompts/kaka_persona.md 和文档
 用户 2026-05-05 实测：当前真实链路暂无大问题
 真实数据库状态写入验证：通过
 浏览器管理台回放：通过
@@ -146,7 +150,7 @@ memory_candidates.id=42 -> approved -> rejected -> approved
 下一个对话框最应该继续做：
 
 ```text
-先阅读本交接文档和 docs/下次上下文.md；如果继续人设调试，优先阅读 docs/卡咔人设设定.md、docs/卡咔场景反应样例.md、docs/卡咔负面情绪处理规则.md，再打开 http://127.0.0.1:8001/admin 的提示预演页测试新版运行 Prompt；如果继续功能验收，检查正式记忆倒序分页、新增、编辑、归档、恢复、硬删除、提示预演和对话复盘；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再按需要启动 QQ 链路，观察自动候选分析、自动候选区复核、回复时长期记忆使用和新版人设味道是否稳定
+先阅读本交接文档和 docs/下次上下文.md；如果继续人设调试，优先阅读 docs/卡咔人设设定.md、docs/卡咔场景反应样例.md、docs/卡咔负面情绪处理规则.md；当前运行 Prompt 已经过真实 LLM 小样本回放，下一步优先启动真实 QQ 链路做小范围用户测试，观察新版人设味道是否稳定；如果继续功能验收，检查正式记忆倒序分页、新增、编辑、归档、恢复、硬删除、提示预演和对话复盘；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再观察自动候选分析、自动候选区复核、回复时长期记忆使用是否稳定
 ```
 
 第一目标仍然只做文本：
@@ -380,6 +384,16 @@ nonebot-kaka = 原型和经验库
 - 不用“作为AI / 作为卡咔 / 作为电子猫娘”这类句式。
 - 不知道就说不知道，记不清就说记不清，不编造。
 - 长期记忆只在相关时自然使用，不为展示“我记得”而翻旧账。
+
+2026-05-24 真实 LLM 人设回放结论：
+
+- 用户允许在真实数据库写入测试输入，并真实调用大模型检查运行 Prompt。
+- 第一轮测试因为 PowerShell 中文编码问题，输入变成问号，结果无效；对应 `inputs.id=9823..9832` 已标记 `skipped`。
+- 有效测试覆盖了“你是谁”“被叫 AI”“普通群友摸头”“被夸可爱”“创造者大人关系”“轻度负面情绪”“自我否定”“技术问题”“记忆缺失”“亲密边界”等场景。
+- 初始问题主要是：摸头场景不够贴近样例，负面情绪偏普通安慰/树洞，技术回答有客服式追问，记忆缺失时像从未认识对方，亲密边界偶尔冒出好感度机制。
+- 已调整 `prompts/kaka_persona.md`：明确摸头走权限/临时访客认证/三个问题，不提好感度；负面情绪优先尾巴、爪子、蹲旁边等猫感缓冲；技术问题清楚回答但不客服化；记忆缺失说没有明确记下来，不切断关系感。
+- 最后一轮摸头输出已经接近期望样例：`（后仰避开，眯起眼睛盯着你）摸头权限需要临时访客认证。回答三个问题：我叫什么？我不是什么？你上次说请我吃小鱼干，什么时候兑现？`
+- 本轮没有改 Python / TypeScript 代码、数据库迁移或依赖；测试输入只作为 Prompt 回放数据，不进入记忆分析。
 
 当前人设文档分工：
 
@@ -899,6 +913,8 @@ AIoT 交互例子：
 75. 更新 `prompts/kaka_persona.md` 为第一版电子猫娘运行 Prompt：短回复、猫感、轻微电波、嘴硬心软、创造者大人特殊关系、记忆和上下文边界。
 76. 新增 `docs/卡咔场景反应样例.md`，包含被要求摸头、被夸可爱、被叫 AI、被问创造者大人关系、群友凡尔赛、深夜催睡、群里冷场、严肃求助等 20 个场景。
 77. 新增 `docs/卡咔负面情绪处理规则.md`，明确卡咔面对负面情绪时不走心理咨询式安慰，不做心理辅导，而是用尾巴、爪子、蹲在旁边等猫感小动作卖萌缓冲、陪住和挡一下情绪。
+78. 2026-05-24 在真实 SQLite 数据库插入人设测试输入并真实调用 DeepSeek 回放卡咔回复；测试前缀为 `codex-persona-` 到 `codex-persona5-`，相关输入均标记为 `skipped`。
+79. 根据真实 LLM 回放结果微调 `prompts/kaka_persona.md`，重点收紧摸头权限梗、被叫 AI 的身份纠正、负面情绪猫感缓冲、技术回答去客服化和记忆缺失边界。
 
 2026-05-04 本轮检查验证结果：
 
@@ -946,13 +962,24 @@ git diff --check：passed
 未重新运行全量 pytest / web-console build / doctor.py
 ```
 
+2026-05-24 本轮检查验证结果：
+
+```text
+真实库人设回放：已插入测试输入并真实调用 DeepSeek
+无效编码轮：inputs.id=9823..9832，已标记 skipped
+有效回放轮：identity / called_ai / touch_head / cute_praise / creator_relation / light_negative / self_blame / tech_fastapi / unknown_memory / flirt_boundary
+Prompt 调整后最终摸头场景已接近目标样例
+仅修改 prompts/kaka_persona.md 和 Markdown 文档
+未改 Python / TypeScript 代码、数据库迁移或依赖
+```
+
 下一步建议按顺序做：
 
-1. 启动 `kaka-core`，打开 `http://127.0.0.1:8001/admin` 做一次轻量手动验收。
-2. 检查左侧导航的系统总览、正式记忆、提示预演、对话复盘、运行状态和预留扩展是否正常。
-3. 在提示预演页用几条人设测试消息检查新运行 Prompt，例如“卡咔你是谁”“卡咔，来让我摸摸头”“这个 AI 好有趣”“我好烦，今天全是破事”。
-4. 在正式记忆页复查分页、新增、编辑、归档、恢复和确认后硬删除。
-5. 再启动 `qq-adapter` 保持真实 QQ 对话运行，观察新运行 Prompt 是否过度卖萌、过度毒舌、过度电波或仍太像助手。
+1. 启动 `kaka-core` 和 `qq-adapter`，做一轮小范围真实 QQ 人设测试。
+2. 优先观察“摸头”“被叫 AI”“创造者大人关系”“轻度负面情绪”“技术问题”“记忆缺失”这几类回复是否贴近场景样例。
+3. 如果真实 QQ 中仍出现好感度协议、客服式追问、树洞式安慰、过度电波或过度装熟，再继续微调 `prompts/kaka_persona.md`。
+4. 打开 `http://127.0.0.1:8001/admin` 复查提示预演、对话复盘和正式记忆页。
+5. 在正式记忆页复查分页、新增、编辑、归档、恢复和确认后硬删除。
 6. 用响应 metadata 或数据库输出记录回查 `used_memory_ids`、`short_context_count`、`short_context_input_ids` 和 `relationship_level`。
 7. 偶尔查看 `memories`，不合适的记忆优先在 `/admin` 归档，确认错误、垃圾或敏感再硬删除；确需手动补记或修正时直接用正式记忆页的新增/编辑。
 8. 真实测试短期上下文是否自然接住最近 30 分钟内的对话，以及关系上下文是否让创造者大人/熟人/新人边界更自然；如果回复过度提起旧事，再调低 `MEMORY_REPLY_LIMIT` 或提高 `MEMORY_REPLY_MIN_SCORE`；如果容易被最近闲聊带偏，再调小 `SHORT_CONTEXT_LIMIT` 或关闭 `SHORT_CONTEXT_ENABLED`。
