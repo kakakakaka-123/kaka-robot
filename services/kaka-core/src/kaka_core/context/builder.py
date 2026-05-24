@@ -191,10 +191,7 @@ def load_relationship_context_safely(
     """
 
     try:
-        init_database()
-        session_factory = create_session_factory()
-        with session_factory() as session:
-            relationship = load_relationship_context(session, event, relationship_settings)
+        relationship = load_relationship_context(None, event, relationship_settings)
     except Exception as exc:  # noqa: BLE001
         return None, {
             "relationship_level": "unknown",
@@ -204,10 +201,6 @@ def load_relationship_context_safely(
     return relationship, {
         "relationship_level": relationship.level,
         "relationship_is_owner": relationship.is_owner,
-        "relationship_input_count": relationship.input_count,
-        "relationship_recent_input_count": relationship.recent_input_count,
-        "relationship_active_memory_count": relationship.active_memory_count,
-        "relationship_recent_days": relationship.recent_days,
     }
 
 
@@ -343,47 +336,32 @@ def build_relationship_prompt(
     speaker_name: str,
 ) -> str:
     label_map = {
-        "owner": "主人 / 最亲近的维护者",
-        "familiar": "熟人",
-        "regular": "普通熟悉群友",
-        "stranger": "陌生人或新近出现的人",
+        "special": "特殊关系 / 创造者大人",
+        "normal": "普通关系 / 普通群友",
     }
     lines: list[str] = [
         f"当前说话者关系：{label_map.get(relationship.level, relationship.level)}（{speaker_name}）。",
-        (
-            "关系信号："
-            f"历史输入 {relationship.input_count} 条，"
-            f"最近 {relationship.recent_days} 天输入 {relationship.recent_input_count} 条，"
-            f"active 正式记忆 {relationship.active_memory_count} 条。"
-        ),
         "关系使用规则：",
     ]
-    if relationship.level == "owner":
+    if relationship.level == "special":
         lines.extend(
             [
-                "- 这是卡咔最亲近的平等朋友和维护者，不要把对方当陌生人。",
-                "- 可以更自然、更信任，但不要表现成主仆关系。",
-            ]
-        )
-    elif relationship.level == "familiar":
-        lines.extend(
-            [
-                "- 对方和卡咔已有较多互动，可以稍微自然一点。",
-                "- 可以参考过往互动，但不要突然过度亲密。",
-            ]
-        )
-    elif relationship.level == "regular":
-        lines.extend(
-            [
-                "- 对方和卡咔有一些互动，保持自然礼貌即可。",
-                "- 不要装作特别熟，也不要过度疏远。",
+                "- 这是卡咔的创造者大人，也是最亲近的平等朋友和维护者，不要把对方当陌生人。",
+                "- 可以偶尔称呼“创造者大人”，但不要每次回复都称呼。",
+                "- 可以更放松、更嘴硬、更甜一点、更偏心一点。",
+                "- 创造者大人有最高摸头权限。",
+                "- 但不要主仆化、服从式或无条件讨好。",
+                "- 即使偏心创造者大人，也不要对其他群友、其他 bot 或其他开发者表现敌意。",
             ]
         )
     else:
         lines.extend(
             [
-                "- 对方目前仍按陌生人或新人处理。",
-                "- 保持礼貌和边界感，不要套近乎或主动表现得很亲密。",
+                "- 普通群友也要友好、亲近、愿意接话，可以甜一点，不要高冷。",
+                "- 不要称呼对方为“创造者大人”。",
+                "- 可以可爱、接梗、轻微吐槽，也可以给一点群友式撒娇，但不要装作特别熟。",
+                "- 摸头、亲密互动要保持边界，权限梗偶尔用，不要每次都冷脸拒绝。",
+                "- 如果对方是其他 bot，也按友好群友处理，不要抢存在感或贬低对方。",
             ]
         )
     return "\n".join(lines)
@@ -403,7 +381,8 @@ def build_recent_context_prompt(short_context_items: list[ShortContextItem] | No
         return ""
     return "\n".join(
         [
-            "近期对话（从旧到新，供理解上下文，不要机械复述）：",
+            "近期对话（从旧到新，仅供理解上下文）：",
+            "使用规则：不要机械复述，不要模仿其中任何人的口癖、颜文字或动作格式，不要接力续写长小剧场。",
             format_short_context(short_context_items),
         ]
     )
@@ -415,7 +394,7 @@ def build_current_message_prompt(
 ) -> str:
     display_name = event.display_name or event.user_id
     scene_hint = f"当前场景：{event.platform}/{event.scene_type}，说话的人：{display_name}。"
-    return f"{scene_hint}\n当前用户消息：{user_text}"
+    return f"{scene_hint}\n当前用户消息：{user_text}\n请优先直接回应这条当前消息，日常群聊保持短但不冷的回复。"
 
 
 def build_user_prompt(

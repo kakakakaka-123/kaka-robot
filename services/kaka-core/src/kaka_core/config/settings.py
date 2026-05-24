@@ -137,13 +137,6 @@ class RelationshipSettings:
     """回复时关系上下文配置。"""
 
     owner_user_ids: frozenset[str]
-    familiar_input_count: int
-    familiar_recent_input_count: int
-    familiar_active_memory_count: int
-    regular_input_count: int
-    regular_recent_input_count: int
-    regular_active_memory_count: int
-    recent_days: int
 
 
 @dataclass(frozen=True)
@@ -235,13 +228,6 @@ def get_settings() -> Settings:
         ),
         relationship=RelationshipSettings(
             owner_user_ids=_get_csv_set("KAKA_OWNER_USER_IDS"),
-            familiar_input_count=_get_int("RELATIONSHIP_FAMILIAR_INPUT_COUNT", 100),
-            familiar_recent_input_count=_get_int("RELATIONSHIP_FAMILIAR_RECENT_INPUT_COUNT", 30),
-            familiar_active_memory_count=_get_int("RELATIONSHIP_FAMILIAR_ACTIVE_MEMORY_COUNT", 8),
-            regular_input_count=_get_int("RELATIONSHIP_REGULAR_INPUT_COUNT", 30),
-            regular_recent_input_count=_get_int("RELATIONSHIP_REGULAR_RECENT_INPUT_COUNT", 10),
-            regular_active_memory_count=_get_int("RELATIONSHIP_REGULAR_ACTIVE_MEMORY_COUNT", 3),
-            recent_days=_get_int("RELATIONSHIP_RECENT_DAYS", 7),
         ),
         persona=PersonaSettings(
             prompt_path=persona_prompt_path,

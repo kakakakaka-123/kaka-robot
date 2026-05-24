@@ -127,7 +127,7 @@ def test_admin_conversation_detail_resolves_reply_metadata(monkeypatch, tmp_path
                     "memory_count": 1,
                     "short_context_input_ids": [short_context_input.id],
                     "short_context_count": 1,
-                    "relationship_level": "owner",
+                    "relationship_level": "special",
                 },
                 created_at=datetime(2026, 5, 3, 1, 6, tzinfo=timezone.utc),
             )
@@ -142,7 +142,7 @@ def test_admin_conversation_detail_resolves_reply_metadata(monkeypatch, tmp_path
     assert data["conversation"]["id"] == current_input_id
     assert data["conversation"]["output"]["content_text"] == "记得，你喜欢直接的回答。"
     assert data["metadata"]["llm_model"] == "test-model"
-    assert data["metadata"]["relationship_level"] == "owner"
+    assert data["metadata"]["relationship_level"] == "special"
     assert data["used_memory_ids"] == [1]
     assert data["used_memories"][0]["memory_text"] == "用户喜欢直接的回答。"
     assert data["short_context_input_ids"] == [1]
@@ -417,7 +417,7 @@ def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path)
     assert data["metadata"]["short_context_enabled"] is True
     assert data["metadata"]["short_context_count"] == 1
     assert data["metadata"]["short_context_input_ids"] == [1]
-    assert data["metadata"]["relationship_level"] == "stranger"
+    assert data["metadata"]["relationship_level"] == "normal"
     assert data["metadata"]["persona_prompt_source"] == "file"
     assert data["metadata"]["persona_prompt_path"] == str(persona_path)
     assert data["metadata"]["persona_prompt_fallback_used"] is False
@@ -434,7 +434,7 @@ def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path)
     assert data["layers"][2]["title"] == "长期记忆"
     assert data["layers"][3]["title"] == "短期上下文"
     assert data["layers"][4]["title"] == "当前消息"
-    assert data["metadata"]["relationship_input_count"] == 1
+    assert "relationship_input_count" not in data["metadata"]
     assert "当前说话者关系" in data["messages"][0]["content"]
 
 

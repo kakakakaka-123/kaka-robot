@@ -211,11 +211,11 @@ async def test_generate_chat_response_injects_owner_relationship(monkeypatch, tm
     router = FakeRouter()
     response = await generate_chat_response(make_event(), router=router)
 
-    assert "当前说话者关系：主人 / 最亲近的维护者" in router.messages[0].content
+    assert "当前说话者关系：特殊关系 / 创造者大人" in router.messages[0].content
     assert "不要把对方当陌生人" in router.messages[0].content
-    assert response.metadata["relationship_level"] == "owner"
+    assert response.metadata["relationship_level"] == "special"
     assert response.metadata["relationship_is_owner"] is True
-    assert response.metadata["relationship_input_count"] == 0
+    assert "relationship_input_count" not in response.metadata
     get_settings.cache_clear()
 
 
