@@ -4,7 +4,7 @@
 
 ## 0. 最新交接摘要
 
-当前日期：2026-05-24。
+当前日期：2026-05-27。
 当前项目目录：
 
 ```text
@@ -44,6 +44,7 @@ D:\Python\AgentRobot\kaka-v2
 -> 回复前关系上下文注入
 -> 基础人设 Prompt 文件化
 -> 运行版 Prompt 真实 LLM 回放调参
+-> 桌宠客户端第一版本地身体原型
 ```
 
 当前真实状态：
@@ -79,6 +80,7 @@ D:\Python\AgentRobot\kaka-v2
 - 已有 `scripts/doctor.py` 本地自检脚本，用于检查配置形状、数据库、导入和端口状态。
 - 已有 `docs/长期记忆设计.md`，明确第一版记什么、不记什么、`memories` 表建议和抽取规则。
 - 已有本地 Web 管理台：前端在 `apps/web-console`，`kaka-core` 托管 `/admin`，管理 API 在 `/admin/api/*`；当前 Web 界面只暴露系统总览、正式记忆、提示预演、对话复盘、运行状态和预留扩展入口。最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，不再作为日常 Web 页面暴露。
+- 已有桌宠客户端第一版：前端和 Tauri 工程在 `apps/desktop-pet`，技术组合为 Tauri 2 + React/Vite + TypeScript + PixiJS。当前是透明、无边框、置顶的 `280x280` 桌面窗口，已接入 12 张桌宠透明 PNG 状态图，支持右键状态菜单、退出、轻点摸头、拖拽窗口、拖拽反应恢复、2 分钟闲置睡觉、睡眠唤醒和消息气泡雏形。桌宠当前还没有接入 `kaka-core`，下一步应做 `platform=desktop` 的本地消息接入。
 - Web 管理台已成为正式记忆的日常查看和管理入口；脚本现在主要留给开发、测试、批量修复、候选/输入后台处理和应急排查。
 - 近期已补上跨进程事件处理锁和 SQLite 时间戳修正，重复聊天事件在绕过进程内锁时也不会重复调用 LLM；管理总览继续脱敏 `database_url`。
 - 输入分析和候选区的写库能力仍保留在管理 API、脚本和数据库层；Web 日常页面暂不暴露这些后台处理入口。
@@ -119,6 +121,8 @@ web-console：npm run build passed
 2026-05-24 真实库人设回放：已真实调用 DeepSeek；无效编码轮和有效测试轮均已标记 skipped；仅调整 prompts/kaka_persona.md 和文档
 2026-05-24 关系上下文简化：`services/kaka-core/tests` 全量 117 passed；`git diff --check` passed（仅 CRLF 提示）
 2026-05-24 运行人设继续调优：真实 QQ 群聊发现回复过长、动作复发、模仿其他 bot、对同群 bot/开发者有敌意等问题；已更新运行 Prompt 和上下文拼接规则；`test_persona_prompt.py / test_chat_service.py / test_admin_api.py` 定向 36 passed
+2026-05-27 desktop-pet：`npm run build` passed
+2026-05-27 desktop-pet/src-tauri：`cargo check` passed
 用户 2026-05-05 实测：当前真实链路暂无大问题
 真实数据库状态写入验证：通过
 浏览器管理台回放：通过
@@ -152,7 +156,7 @@ memory_candidates.id=42 -> approved -> rejected -> approved
 下一个对话框最应该继续做：
 
 ```text
-先阅读本交接文档和 docs/下次上下文.md；如果继续人设调试，优先阅读 `prompts/kaka_persona.md`、docs/卡咔人设设定.md、docs/卡咔场景反应样例.md、docs/卡咔负面情绪处理规则.md；当前运行 Prompt 已经过真实 LLM 小样本回放和真实 QQ 群聊回放，下一步继续小范围观察“甜但不腻、短但不冷、无动作、同群 bot 友好共存”是否稳定；如果继续功能验收，检查正式记忆倒序分页、新增、编辑、归档、恢复、硬删除、提示预演和对话复盘；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再观察自动候选分析、自动候选区复核、回复时长期记忆使用是否稳定
+先阅读本交接文档和 docs/下次上下文.md；如果继续桌宠方向，优先阅读 `docs/桌宠开发说明.md`，下一步做 `apps/desktop-pet` 到 `kaka-core /v1/chat` 的最小接入：固定输入或小输入框 -> `platform=desktop` 的 `MessageEvent` -> 气泡显示回复 -> 根据请求/回复/失败切换加载中、收到消息、开心或信号弱。桌宠当前不要急着做复杂设置窗口、托盘或完整聊天面板。如果继续人设调试，优先阅读 `prompts/kaka_persona.md`、docs/卡咔人设设定.md、docs/卡咔场景反应样例.md、docs/卡咔负面情绪处理规则.md；当前运行 Prompt 已经过真实 LLM 小样本回放和真实 QQ 群聊回放，下一步继续小范围观察“甜但不腻、短但不冷、无动作、同群 bot 友好共存”是否稳定；如果继续功能验收，检查正式记忆倒序分页、新增、编辑、归档、恢复、硬删除、提示预演和对话复盘；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再观察自动候选分析、自动候选区复核、回复时长期记忆使用是否稳定
 ```
 
 第一目标仍然只做文本：
@@ -581,9 +585,10 @@ AIoT 硬件
 
 ```text
 kaka-v2/
-  apps/
-    qq-adapter/
-    web-console/
+apps/
+  desktop-pet/
+  qq-adapter/
+  web-console/
     iot-adapter/
     voice-gateway/
 

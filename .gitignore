@@ -18,6 +18,7 @@ dist/
 node_modules/
 apps/web-console/node_modules/
 apps/web-console/.vite/
+apps/desktop-pet/src-tauri/target/
 *.tsbuildinfo
 
 # Local environment files
