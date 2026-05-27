@@ -2,12 +2,14 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, EventTarget, Manager};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_MENU_SHOW_HIDE: &str = "tray-show-hide";
+const TRAY_MENU_AUTOSTART: &str = "tray-autostart";
 const TRAY_MENU_RESET_POSITION: &str = "tray-reset-position";
 const TRAY_MENU_CHECK_CORE: &str = "tray-check-core";
 const TRAY_MENU_QUIT: &str = "tray-quit";
@@ -86,8 +88,28 @@ fn emit_tray_event(app: &tauri::AppHandle, event_name: &str) {
     );
 }
 
+fn toggle_autostart(app: &tauri::AppHandle, menu_item: &tauri::menu::CheckMenuItem<tauri::Wry>) {
+    let autolaunch = app.autolaunch();
+    let next_enabled = !autolaunch.is_enabled().unwrap_or(false);
+    let result = if next_enabled {
+        autolaunch.enable()
+    } else {
+        autolaunch.disable()
+    };
+
+    if result.is_ok() {
+        let _ = menu_item.set_checked(next_enabled);
+    } else if let Ok(current_enabled) = autolaunch.is_enabled() {
+        let _ = menu_item.set_checked(current_enabled);
+    }
+}
+
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let show_hide = MenuItemBuilder::with_id(TRAY_MENU_SHOW_HIDE, "显示/隐藏卡咔").build(app)?;
+    let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+    let autostart = CheckMenuItemBuilder::with_id(TRAY_MENU_AUTOSTART, "开机自启")
+        .checked(autostart_enabled)
+        .build(app)?;
     let reset_position =
         MenuItemBuilder::with_id(TRAY_MENU_RESET_POSITION, "重置位置").build(app)?;
     let check_core = MenuItemBuilder::with_id(TRAY_MENU_CHECK_CORE, "连接测试").build(app)?;
@@ -95,6 +117,7 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
 
     let menu = MenuBuilder::new(app)
         .item(&show_hide)
+        .item(&autostart)
         .separator()
         .item(&reset_position)
         .item(&check_core)
@@ -103,6 +126,7 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
         .build()?;
 
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.ico"))?;
+    let autostart_for_menu = autostart.clone();
 
     TrayIconBuilder::with_id("kaka-main-tray")
         .tooltip("卡咔桌宠")
@@ -121,8 +145,9 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
                 toggle_main_window(tray.app_handle());
             }
         })
-        .on_menu_event(|app, event| match event.id().as_ref() {
+        .on_menu_event(move |app, event| match event.id().as_ref() {
             TRAY_MENU_SHOW_HIDE => toggle_main_window(app),
+            TRAY_MENU_AUTOSTART => toggle_autostart(app, &autostart_for_menu),
             TRAY_MENU_RESET_POSITION => emit_tray_event(app, TRAY_EVENT_RESET_POSITION),
             TRAY_MENU_CHECK_CORE => emit_tray_event(app, TRAY_EVENT_CHECK_CORE),
             TRAY_MENU_QUIT => exit_app(app),
@@ -136,6 +161,10 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             setup_tray(app)?;
             Ok(())
