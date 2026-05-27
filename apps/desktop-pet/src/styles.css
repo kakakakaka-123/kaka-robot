@@ -192,3 +192,147 @@ button {
 .quit-button {
   border-top: 1px solid rgba(255, 143, 196, 0.28) !important;
 }
+
+.settings-shell {
+  width: 100vw;
+  height: 100vh;
+  padding: 18px;
+  color: #2f2630;
+  background: #fbfaf7;
+  font-family:
+    "Microsoft YaHei",
+    "Segoe UI",
+    sans-serif;
+  overflow: hidden;
+}
+
+.settings-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e2ddd4;
+}
+
+.settings-header h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.settings-header p {
+  margin: 5px 0 0;
+  color: #746b6f;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.settings-status-pill {
+  flex: 0 0 auto;
+  max-width: 140px;
+  padding: 6px 10px;
+  border: 1px solid #bfd9d5;
+  border-radius: 999px;
+  color: #1f5a57;
+  background: #e9f5f3;
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.settings-section {
+  padding: 15px 0 0;
+}
+
+.settings-section h2 {
+  margin: 0 0 10px;
+  color: #5a3247;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  border-bottom: 1px solid #ece7df;
+  color: #5c5458;
+  font-size: 13px;
+}
+
+.settings-row strong {
+  color: #2f2630;
+  font-size: 13px;
+}
+
+.settings-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.settings-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d8cfd7;
+  border-radius: 7px;
+  color: #43253a;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.settings-actions button:hover {
+  border-color: #c76b9a;
+  background: #fff4f9;
+}
+
+.settings-toggle,
+.settings-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  border-bottom: 1px solid #ece7df;
+  color: #3e363a;
+  font-size: 13px;
+}
+
+.settings-toggle {
+  justify-content: flex-start;
+}
+
+.settings-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #c64f87;
+}
+
+.settings-field select {
+  width: 132px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #d8cfd7;
+  border-radius: 7px;
+  color: #2f2630;
+  background: #ffffff;
+  font: inherit;
+}
+
+.settings-message {
+  margin-top: 16px;
+  min-height: 34px;
+  padding: 9px 10px;
+  border: 1px solid #bfd9d5;
+  border-radius: 7px;
+  color: #1f5a57;
+  background: #eef8f6;
+  font-size: 13px;
+  line-height: 1.3;
+}

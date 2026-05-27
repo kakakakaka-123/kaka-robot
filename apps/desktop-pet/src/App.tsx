@@ -3,6 +3,13 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { cursorPosition, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  readDesktopPetSettings,
+  SETTINGS_UPDATED_EVENT,
+  TRAY_EVENT_CHECK_CORE,
+  TRAY_EVENT_RESET_POSITION,
+  WINDOW_POSITION_STORAGE_KEY
+} from "./desktopPetSettings";
 import { PetCanvas } from "./PetCanvas";
 import { PET_STATE_OPTIONS, PET_STATES, type PetStateId } from "./petStates";
 
@@ -42,11 +49,7 @@ const CONTEXT_MENU_HEIGHT = 247;
 const CONTEXT_MENU_MARGIN = 8;
 const PET_REACTION_DURATION_MS = 2000;
 const SPEECH_BUBBLE_DURATION_MS = 2600;
-const IDLE_SLEEP_DELAY_MS = 2 * 60 * 1000;
 const POINTER_DRAG_THRESHOLD_PX = 6;
-const WINDOW_POSITION_STORAGE_KEY = "kaka.desktopPet.windowPosition";
-const TRAY_EVENT_RESET_POSITION = "kaka-tray-reset-position";
-const TRAY_EVENT_CHECK_CORE = "kaka-tray-check-core";
 const IDLE_AMBIENT_MIN_DELAY_MS = 45 * 1000;
 const IDLE_AMBIENT_MAX_DELAY_MS = 120 * 1000;
 
@@ -134,6 +137,7 @@ export function App() {
   const idleAmbientTimerRef = useRef<number | null>(null);
   const idleAmbientRestoreTimerRef = useRef<number | null>(null);
   const idleAmbientStateRef = useRef<PetStateId | null>(null);
+  const settingsRef = useRef(readDesktopPetSettings());
 
   const setPetState = useCallback((nextStateId: PetStateId) => {
     petStateIdRef.current = nextStateId;
@@ -201,6 +205,8 @@ export function App() {
 
   const scheduleIdleAmbient = useCallback(() => {
     clearIdleAmbientTimer();
+    if (!settingsRef.current.idleAmbientEnabled) return;
+
     const nextDelayMs = getRandomInt(IDLE_AMBIENT_MIN_DELAY_MS, IDLE_AMBIENT_MAX_DELAY_MS);
 
     idleAmbientTimerRef.current = window.setTimeout(() => {
@@ -244,13 +250,16 @@ export function App() {
 
   const resetIdleTimer = useCallback(() => {
     clearIdleTimer();
+    const idleSleepDelayMs = settingsRef.current.idleSleepDelayMs;
+    if (idleSleepDelayMs === null) return;
+
     idleTimerRef.current = window.setTimeout(() => {
       clearPetReactionTimer();
       if (petStateIdRef.current !== "drag") {
         showSpeechBubble(PET_STATE_BUBBLE_TEXT.sleep ?? "我先睡一会儿...");
         setPetState("sleep");
       }
-    }, IDLE_SLEEP_DELAY_MS);
+    }, idleSleepDelayMs);
   }, [clearIdleTimer, clearPetReactionTimer, setPetState, showSpeechBubble]);
 
   const registerActivity = useCallback(() => {
@@ -539,6 +548,40 @@ export function App() {
       }
     };
   }, [resetWindowPosition, testCoreConnection]);
+
+  useEffect(() => {
+    const applySettings = () => {
+      settingsRef.current = readDesktopPetSettings();
+      if (!settingsRef.current.idleAmbientEnabled) {
+        cancelIdleAmbientAction();
+        clearIdleAmbientTimer();
+      } else {
+        scheduleIdleAmbient();
+      }
+      resetIdleTimer();
+    };
+
+    let disposed = false;
+    let unlistenSettings: UnlistenFn | null = null;
+    void listen(SETTINGS_UPDATED_EVENT, applySettings)
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+        } else {
+          unlistenSettings = unlisten;
+        }
+      })
+      .catch(() => {
+        // 浏览器预览环境没有 Tauri 事件通道，忽略即可。
+      });
+
+    window.addEventListener("storage", applySettings);
+    return () => {
+      disposed = true;
+      window.removeEventListener("storage", applySettings);
+      unlistenSettings?.();
+    };
+  }, [cancelIdleAmbientAction, clearIdleAmbientTimer, resetIdleTimer, scheduleIdleAmbient]);
 
   useEffect(() => {
     resetIdleTimer();
