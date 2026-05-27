@@ -162,6 +162,33 @@ button {
   background: #d84f91;
 }
 
+.menu-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding-bottom: 4px;
+}
+
+.menu-action-button {
+  color: #ffffff !important;
+}
+
+.connection-button {
+  background: #cf4e89 !important;
+}
+
+.connection-button:hover {
+  background: #b83f78 !important;
+}
+
+.reset-position-button {
+  background: #8b5fbf !important;
+}
+
+.reset-position-button:hover {
+  background: #744da5 !important;
+}
+
 .quit-button {
   border-top: 1px solid rgba(255, 143, 196, 0.28) !important;
 }

@@ -16,6 +16,11 @@ type SpeechBubbleState = {
   text: string;
 };
 
+type StoredWindowPosition = {
+  x: number;
+  y: number;
+};
+
 type PointerSession = {
   pointerId: number;
   startX: number;
@@ -32,12 +37,15 @@ type PointerSession = {
 };
 
 const CONTEXT_MENU_WIDTH = 164;
-const CONTEXT_MENU_HEIGHT = 218;
+const CONTEXT_MENU_HEIGHT = 247;
 const CONTEXT_MENU_MARGIN = 8;
 const PET_REACTION_DURATION_MS = 2000;
 const SPEECH_BUBBLE_DURATION_MS = 2600;
 const IDLE_SLEEP_DELAY_MS = 2 * 60 * 1000;
 const POINTER_DRAG_THRESHOLD_PX = 6;
+const WINDOW_POSITION_STORAGE_KEY = "kaka.desktopPet.windowPosition";
+const IDLE_AMBIENT_MIN_DELAY_MS = 45 * 1000;
+const IDLE_AMBIENT_MAX_DELAY_MS = 120 * 1000;
 
 const initialContextMenu: ContextMenuState = {
   visible: false,
@@ -64,6 +72,52 @@ const PET_STATE_BUBBLE_TEXT: Partial<Record<PetStateId, string>> = {
   weakSignal: "信号有点弱。"
 };
 
+const IDLE_AMBIENT_BUBBLES = [
+  "缓存有点热...",
+  "今天也在桌面巡逻。",
+  "别偷偷关闭卡咔。",
+  "核心信号待机中。",
+  "卡咔正在观察桌面。"
+] as const;
+
+const IDLE_AMBIENT_ACTIONS: Array<{
+  stateId: Extract<PetStateId, "happy" | "thinking" | "sleepy">;
+  durationMs: number;
+}> = [
+  { stateId: "happy", durationMs: 3200 },
+  { stateId: "thinking", durationMs: 4200 },
+  { stateId: "sleepy", durationMs: 5200 }
+];
+
+function readStoredWindowPosition(): StoredWindowPosition | null {
+  try {
+    const rawValue = window.localStorage.getItem(WINDOW_POSITION_STORAGE_KEY);
+    if (!rawValue) return null;
+
+    const parsedValue = JSON.parse(rawValue) as Partial<StoredWindowPosition>;
+    if (!isValidWindowCoordinate(parsedValue.x) || !isValidWindowCoordinate(parsedValue.y)) return null;
+
+    return {
+      x: Math.round(parsedValue.x),
+      y: Math.round(parsedValue.y)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isValidWindowCoordinate(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && Math.abs(value) < 100000;
+}
+
+function getRandomInt(min: number, max: number): number {
+  return Math.floor(window.crypto.getRandomValues(new Uint32Array(1))[0] / (0xffffffff + 1) * (max - min + 1)) + min;
+}
+
+function pickRandomItem<T>(items: readonly T[]): T {
+  return items[getRandomInt(0, items.length - 1)];
+}
+
 export function App() {
   const [petStateId, setPetStateId] = useState<PetStateId>("idle");
   const [contextMenu, setContextMenu] = useState(initialContextMenu);
@@ -74,6 +128,9 @@ export function App() {
   const petReactionTimerRef = useRef<number | null>(null);
   const speechBubbleTimerRef = useRef<number | null>(null);
   const idleTimerRef = useRef<number | null>(null);
+  const idleAmbientTimerRef = useRef<number | null>(null);
+  const idleAmbientRestoreTimerRef = useRef<number | null>(null);
+  const idleAmbientStateRef = useRef<PetStateId | null>(null);
 
   const setPetState = useCallback((nextStateId: PetStateId) => {
     petStateIdRef.current = nextStateId;
@@ -98,6 +155,18 @@ export function App() {
     idleTimerRef.current = null;
   }, []);
 
+  const clearIdleAmbientTimer = useCallback(() => {
+    if (idleAmbientTimerRef.current === null) return;
+    window.clearTimeout(idleAmbientTimerRef.current);
+    idleAmbientTimerRef.current = null;
+  }, []);
+
+  const clearIdleAmbientRestoreTimer = useCallback(() => {
+    if (idleAmbientRestoreTimerRef.current === null) return;
+    window.clearTimeout(idleAmbientRestoreTimerRef.current);
+    idleAmbientRestoreTimerRef.current = null;
+  }, []);
+
   const hideContextMenu = useCallback(() => {
     setContextMenu(initialContextMenu);
   }, []);
@@ -119,6 +188,57 @@ export function App() {
     [clearSpeechBubbleTimer]
   );
 
+  const cancelIdleAmbientAction = useCallback(() => {
+    clearIdleAmbientRestoreTimer();
+    if (idleAmbientStateRef.current && petStateIdRef.current === idleAmbientStateRef.current) {
+      setPetState("idle");
+    }
+    idleAmbientStateRef.current = null;
+  }, [clearIdleAmbientRestoreTimer, setPetState]);
+
+  const scheduleIdleAmbient = useCallback(() => {
+    clearIdleAmbientTimer();
+    const nextDelayMs = getRandomInt(IDLE_AMBIENT_MIN_DELAY_MS, IDLE_AMBIENT_MAX_DELAY_MS);
+
+    idleAmbientTimerRef.current = window.setTimeout(() => {
+      idleAmbientTimerRef.current = null;
+
+      if (petStateIdRef.current !== "idle" || contextMenu.visible || pointerSessionRef.current?.dragging) {
+        scheduleIdleAmbient();
+        return;
+      }
+
+      if (getRandomInt(0, 1) === 0) {
+        showSpeechBubble(pickRandomItem(IDLE_AMBIENT_BUBBLES));
+      } else {
+        const action = pickRandomItem(IDLE_AMBIENT_ACTIONS);
+        idleAmbientStateRef.current = action.stateId;
+        setPetState(action.stateId);
+        const bubbleText = PET_STATE_BUBBLE_TEXT[action.stateId];
+        if (bubbleText) {
+          showSpeechBubble(bubbleText);
+        }
+
+        clearIdleAmbientRestoreTimer();
+        idleAmbientRestoreTimerRef.current = window.setTimeout(() => {
+          if (idleAmbientStateRef.current === action.stateId && petStateIdRef.current === action.stateId) {
+            setPetState("idle");
+          }
+          idleAmbientStateRef.current = null;
+          idleAmbientRestoreTimerRef.current = null;
+        }, action.durationMs);
+      }
+
+      scheduleIdleAmbient();
+    }, nextDelayMs);
+  }, [
+    clearIdleAmbientRestoreTimer,
+    clearIdleAmbientTimer,
+    contextMenu.visible,
+    setPetState,
+    showSpeechBubble
+  ]);
+
   const resetIdleTimer = useCallback(() => {
     clearIdleTimer();
     idleTimerRef.current = window.setTimeout(() => {
@@ -131,13 +251,29 @@ export function App() {
   }, [clearIdleTimer, clearPetReactionTimer, setPetState, showSpeechBubble]);
 
   const registerActivity = useCallback(() => {
+    cancelIdleAmbientAction();
     const wasSleeping = petStateIdRef.current === "sleep";
     resetIdleTimer();
     if (wasSleeping) {
       setPetState("idle");
       showSpeechBubble("唔...我醒啦。");
     }
-  }, [resetIdleTimer, setPetState, showSpeechBubble]);
+  }, [cancelIdleAmbientAction, resetIdleTimer, setPetState, showSpeechBubble]);
+
+  const saveWindowPosition = useCallback(async () => {
+    try {
+      const position = await getCurrentWindow().outerPosition();
+      window.localStorage.setItem(
+        WINDOW_POSITION_STORAGE_KEY,
+        JSON.stringify({
+          x: Math.round(position.x),
+          y: Math.round(position.y)
+        })
+      );
+    } catch {
+      // 浏览器预览环境没有 Tauri 窗口对象，忽略即可。
+    }
+  }, []);
 
   const restoreStateAfterDrag = useCallback(() => {
     if (petStateIdRef.current === "drag") {
@@ -272,11 +408,12 @@ export function App() {
 
       if (pointerSession.dragging) {
         restoreStateAfterDrag();
+        window.setTimeout(() => void saveWindowPosition(), 80);
       } else {
         triggerPetReaction();
       }
     },
-    [restoreStateAfterDrag, triggerPetReaction]
+    [restoreStateAfterDrag, saveWindowPosition, triggerPetReaction]
   );
 
   const cancelPetPointer = useCallback(
@@ -290,9 +427,10 @@ export function App() {
       }
       if (pointerSession.dragging) {
         restoreStateAfterDrag();
+        window.setTimeout(() => void saveWindowPosition(), 80);
       }
     },
-    [restoreStateAfterDrag]
+    [restoreStateAfterDrag, saveWindowPosition]
   );
 
   const showContextMenu = useCallback((event: React.MouseEvent) => {
@@ -310,6 +448,8 @@ export function App() {
   const selectPetState = useCallback(
     (stateId: PetStateId) => {
       registerActivity();
+      clearIdleAmbientRestoreTimer();
+      idleAmbientStateRef.current = null;
       clearPetReactionTimer();
       setPetState(stateId);
       const bubbleText = PET_STATE_BUBBLE_TEXT[stateId];
@@ -318,8 +458,39 @@ export function App() {
       }
       hideContextMenu();
     },
-    [clearPetReactionTimer, hideContextMenu, registerActivity, setPetState, showSpeechBubble]
+    [clearIdleAmbientRestoreTimer, clearPetReactionTimer, hideContextMenu, registerActivity, setPetState, showSpeechBubble]
   );
+
+  const testCoreConnection = useCallback(async () => {
+    registerActivity();
+    clearPetReactionTimer();
+    hideContextMenu();
+    setPetState("loading");
+    showSpeechBubble("正在检查核心信号...");
+
+    try {
+      await invoke("check_kaka_core_health");
+      setPetState("message");
+      showSpeechBubble("核心信号正常。");
+    } catch {
+      setPetState("weakSignal");
+      showSpeechBubble("信号有点弱，核心大脑没连上。");
+    }
+  }, [clearPetReactionTimer, hideContextMenu, registerActivity, setPetState, showSpeechBubble]);
+
+  const resetWindowPosition = useCallback(async () => {
+    registerActivity();
+    hideContextMenu();
+    window.localStorage.removeItem(WINDOW_POSITION_STORAGE_KEY);
+
+    try {
+      await getCurrentWindow().center();
+      setPetState("idle");
+      showSpeechBubble("卡咔回到屏幕中间了。");
+    } catch {
+      showSpeechBubble("位置重置失败了。");
+    }
+  }, [hideContextMenu, registerActivity, setPetState, showSpeechBubble]);
 
   const quit = useCallback(async () => {
     try {
@@ -330,13 +501,32 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const storedPosition = readStoredWindowPosition();
+    if (storedPosition) {
+      void getCurrentWindow().setPosition(new PhysicalPosition(storedPosition.x, storedPosition.y));
+    }
+  }, []);
+
+  useEffect(() => {
     resetIdleTimer();
+    scheduleIdleAmbient();
     return () => {
       clearIdleTimer();
+      clearIdleAmbientTimer();
+      clearIdleAmbientRestoreTimer();
+      idleAmbientStateRef.current = null;
       clearPetReactionTimer();
       clearSpeechBubbleTimer();
     };
-  }, [clearIdleTimer, clearPetReactionTimer, clearSpeechBubbleTimer, resetIdleTimer]);
+  }, [
+    clearIdleAmbientRestoreTimer,
+    clearIdleAmbientTimer,
+    clearIdleTimer,
+    clearPetReactionTimer,
+    clearSpeechBubbleTimer,
+    resetIdleTimer,
+    scheduleIdleAmbient
+  ]);
 
   useEffect(() => {
     const onPointerDown = () => {
@@ -380,6 +570,22 @@ export function App() {
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
         >
+          <div className="menu-actions">
+            <button
+              type="button"
+              className="menu-action-button connection-button"
+              onClick={() => void testCoreConnection()}
+            >
+              连接测试
+            </button>
+            <button
+              type="button"
+              className="menu-action-button reset-position-button"
+              onClick={() => void resetWindowPosition()}
+            >
+              重置位置
+            </button>
+          </div>
           <div className="context-menu-title">切换状态</div>
           <div className="state-menu">
             {PET_STATE_OPTIONS.map((state) => (
