@@ -2,9 +2,21 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{Emitter, EventTarget, Manager};
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const TRAY_MENU_SHOW_HIDE: &str = "tray-show-hide";
+const TRAY_MENU_RESET_POSITION: &str = "tray-reset-position";
+const TRAY_MENU_CHECK_CORE: &str = "tray-check-core";
+const TRAY_MENU_QUIT: &str = "tray-quit";
+const TRAY_EVENT_RESET_POSITION: &str = "kaka-tray-reset-position";
+const TRAY_EVENT_CHECK_CORE: &str = "kaka-tray-check-core";
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
-    app.exit(0);
+    exit_app(&app);
 }
 
 #[tauri::command]
@@ -40,9 +52,94 @@ fn check_kaka_core_health() -> Result<(), String> {
     }
 }
 
+fn exit_app(app: &tauri::AppHandle) {
+    app.exit(0);
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn toggle_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        match window.is_visible() {
+            Ok(true) => {
+                let _ = window.hide();
+            }
+            _ => {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+    }
+}
+
+fn emit_tray_event(app: &tauri::AppHandle, event_name: &str) {
+    show_main_window(app);
+    let _ = app.emit_to(
+        EventTarget::webview_window(MAIN_WINDOW_LABEL),
+        event_name,
+        (),
+    );
+}
+
+fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
+    let show_hide = MenuItemBuilder::with_id(TRAY_MENU_SHOW_HIDE, "显示/隐藏卡咔").build(app)?;
+    let reset_position =
+        MenuItemBuilder::with_id(TRAY_MENU_RESET_POSITION, "重置位置").build(app)?;
+    let check_core = MenuItemBuilder::with_id(TRAY_MENU_CHECK_CORE, "连接测试").build(app)?;
+    let quit = MenuItemBuilder::with_id(TRAY_MENU_QUIT, "退出").build(app)?;
+
+    let menu = MenuBuilder::new(app)
+        .item(&show_hide)
+        .separator()
+        .item(&reset_position)
+        .item(&check_core)
+        .separator()
+        .item(&quit)
+        .build()?;
+
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.ico"))?;
+
+    TrayIconBuilder::with_id("kaka-main-tray")
+        .tooltip("卡咔桌宠")
+        .icon(icon)
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+            ) {
+                toggle_main_window(tray.app_handle());
+            }
+        })
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_MENU_SHOW_HIDE => toggle_main_window(app),
+            TRAY_MENU_RESET_POSITION => emit_tray_event(app, TRAY_EVENT_RESET_POSITION),
+            TRAY_MENU_CHECK_CORE => emit_tray_event(app, TRAY_EVENT_CHECK_CORE),
+            TRAY_MENU_QUIT => exit_app(app),
+            _ => {}
+        })
+        .build(app)?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            setup_tray(app)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![check_kaka_core_health, quit_app])
         .run(tauri::generate_context!())
         .expect("failed to run Kaka desktop pet");

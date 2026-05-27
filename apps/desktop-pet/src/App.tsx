@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { cursorPosition, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -44,6 +45,8 @@ const SPEECH_BUBBLE_DURATION_MS = 2600;
 const IDLE_SLEEP_DELAY_MS = 2 * 60 * 1000;
 const POINTER_DRAG_THRESHOLD_PX = 6;
 const WINDOW_POSITION_STORAGE_KEY = "kaka.desktopPet.windowPosition";
+const TRAY_EVENT_RESET_POSITION = "kaka-tray-reset-position";
+const TRAY_EVENT_CHECK_CORE = "kaka-tray-check-core";
 const IDLE_AMBIENT_MIN_DELAY_MS = 45 * 1000;
 const IDLE_AMBIENT_MAX_DELAY_MS = 120 * 1000;
 
@@ -506,6 +509,36 @@ export function App() {
       void getCurrentWindow().setPosition(new PhysicalPosition(storedPosition.x, storedPosition.y));
     }
   }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const unlisteners: UnlistenFn[] = [];
+
+    const addTrayListener = async (eventName: string, handler: () => void | Promise<void>) => {
+      try {
+        const unlisten = await listen(eventName, () => {
+          void handler();
+        });
+        if (disposed) {
+          unlisten();
+        } else {
+          unlisteners.push(unlisten);
+        }
+      } catch {
+        // 浏览器预览环境没有 Tauri 事件通道，忽略即可。
+      }
+    };
+
+    void addTrayListener(TRAY_EVENT_RESET_POSITION, resetWindowPosition);
+    void addTrayListener(TRAY_EVENT_CHECK_CORE, testCoreConnection);
+
+    return () => {
+      disposed = true;
+      for (const unlisten of unlisteners) {
+        unlisten();
+      }
+    };
+  }, [resetWindowPosition, testCoreConnection]);
 
   useEffect(() => {
     resetIdleTimer();
