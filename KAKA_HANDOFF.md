@@ -129,6 +129,7 @@ web-console：npm run build passed
 2026-05-27 desktop-pet 系统托盘基础版：`npm run build` passed；`cargo check` passed；`cargo test` passed；`npm run tauri:build` passed
 2026-05-27 desktop-pet 开机自启基础版：`npm run build` passed；`cargo check` passed
 2026-05-27 desktop-pet 设置窗口基础版：`npm run build` passed；`cargo check` passed
+2026-05-27 用户实测：桌宠托盘入口、任务栏隐藏、开机自启勾选和设置窗口基础功能当前无问题
 用户 2026-05-05 实测：当前真实链路暂无大问题
 真实数据库状态写入验证：通过
 浏览器管理台回放：通过
