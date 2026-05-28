@@ -5,11 +5,39 @@ import { App } from "./App";
 import { SettingsApp } from "./SettingsApp";
 import "./styles.css";
 
-const view = new URLSearchParams(window.location.search).get("view");
-const RootComponent = view === "settings" ? SettingsApp : App;
+type ErrorBoundaryState = {
+  error: Error | null;
+};
+
+class ErrorBoundary extends React.Component<React.PropsWithChildren, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <main className="app-error-shell">
+          <h1>窗口加载失败</h1>
+          <p>{this.state.error.message || "前端运行时出现异常。"}</p>
+        </main>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+const searchView = new URLSearchParams(window.location.search).get("view");
+const hashView = window.location.hash.replace(/^#\/?/, "");
+const RootComponent = searchView === "settings" || hashView === "settings" ? SettingsApp : App;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <RootComponent />
+    <ErrorBoundary>
+      <RootComponent />
+    </ErrorBoundary>
   </React.StrictMode>
 );

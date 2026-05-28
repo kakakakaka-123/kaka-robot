@@ -243,7 +243,34 @@ button {
     "Microsoft YaHei",
     "Segoe UI",
     sans-serif;
-  overflow: hidden;
+  overflow-y: auto;
+}
+
+.app-error-shell {
+  width: 100vw;
+  height: 100vh;
+  padding: 18px;
+  color: #2f2630;
+  background: #fbfaf7;
+  font-family:
+    "Microsoft YaHei",
+    "Segoe UI",
+    sans-serif;
+}
+
+.app-error-shell h1 {
+  margin: 0 0 10px;
+  color: #8a2638;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.app-error-shell p {
+  margin: 0;
+  color: #5c5458;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .settings-header {
