@@ -26,6 +26,7 @@ const STARTUP_SETTINGS_FILE_NAME: &str = "desktop-pet-startup.json";
 
 #[derive(Default)]
 struct TrayState {
+    show_hide_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     autostart_item: Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>,
 }
 
@@ -55,9 +56,12 @@ fn show_settings_window(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn get_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
-    app.autolaunch()
+    let enabled = app
+        .autolaunch()
         .is_enabled()
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    sync_autostart_menu(&app, enabled);
+    Ok(enabled)
 }
 
 #[tauri::command]
@@ -128,6 +132,7 @@ fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.show();
         let _ = window.set_focus();
+        sync_main_window_menu(app, true);
     }
 }
 
@@ -174,6 +179,8 @@ fn apply_initial_main_window_visibility(app: &tauri::AppHandle) {
 
     if should_show {
         show_main_window(app);
+    } else {
+        sync_main_window_menu(app, false);
     }
 }
 
@@ -182,10 +189,12 @@ fn toggle_main_window(app: &tauri::AppHandle) {
         match window.is_visible() {
             Ok(true) => {
                 let _ = window.hide();
+                sync_main_window_menu(app, false);
             }
             _ => {
                 let _ = window.show();
                 let _ = window.set_focus();
+                sync_main_window_menu(app, true);
             }
         }
     }
@@ -235,6 +244,19 @@ fn sync_autostart_menu(app: &tauri::AppHandle, enabled: bool) {
     }
 }
 
+fn sync_main_window_menu(app: &tauri::AppHandle, visible: bool) {
+    let menu_item = app
+        .state::<TrayState>()
+        .show_hide_item
+        .lock()
+        .unwrap()
+        .clone();
+    if let Some(menu_item) = menu_item {
+        let text = if visible { "隐藏卡咔" } else { "显示卡咔" };
+        let _ = menu_item.set_text(text);
+    }
+}
+
 fn set_autostart_enabled_internal(app: &tauri::AppHandle, enabled: bool) -> Result<bool, String> {
     let autolaunch = app.autolaunch();
     let result = if enabled {
@@ -268,7 +290,7 @@ fn toggle_autostart(app: &tauri::AppHandle) {
 }
 
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
-    let show_hide = MenuItemBuilder::with_id(TRAY_MENU_SHOW_HIDE, "显示/隐藏卡咔").build(app)?;
+    let show_hide = MenuItemBuilder::with_id(TRAY_MENU_SHOW_HIDE, "显示卡咔").build(app)?;
     let settings = MenuItemBuilder::with_id(TRAY_MENU_SETTINGS, "设置").build(app)?;
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart = CheckMenuItemBuilder::with_id(TRAY_MENU_AUTOSTART, "开机自启")
@@ -296,6 +318,11 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
         .lock()
         .unwrap()
         .replace(autostart.clone());
+    app.state::<TrayState>()
+        .show_hide_item
+        .lock()
+        .unwrap()
+        .replace(show_hide.clone());
 
     TrayIconBuilder::with_id("kaka-main-tray")
         .tooltip("卡咔桌宠")
