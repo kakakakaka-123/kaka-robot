@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { App } from "./App";
 import { SettingsApp } from "./SettingsApp";
@@ -32,7 +33,17 @@ class ErrorBoundary extends React.Component<React.PropsWithChildren, ErrorBounda
 
 const searchView = new URLSearchParams(window.location.search).get("view");
 const hashView = window.location.hash.replace(/^#\/?/, "");
-const RootComponent = searchView === "settings" || hashView === "settings" ? SettingsApp : App;
+
+function getTauriWindowLabel() {
+  try {
+    return getCurrentWindow().label;
+  } catch {
+    return null;
+  }
+}
+
+const windowLabel = getTauriWindowLabel();
+const RootComponent = searchView === "settings" || hashView === "settings" || windowLabel === "settings" ? SettingsApp : App;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
