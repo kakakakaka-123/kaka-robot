@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, EventTarget, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, EventTarget, Manager, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -232,20 +232,7 @@ fn open_settings_window(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(
-        app,
-        SETTINGS_WINDOW_LABEL,
-        WebviewUrl::App("index.html".into()),
-    )
-    .title("卡咔设置")
-    .inner_size(420.0, 640.0)
-    .resizable(false)
-    .decorations(true)
-    .center()
-    .build()
-    .map_err(|error| error.to_string())?;
-
-    Ok(())
+    Err("settings window not found".to_string())
 }
 
 fn emit_tray_event(app: &tauri::AppHandle, event_name: &str) {
@@ -408,6 +395,14 @@ pub fn run() {
             set_startup_settings,
             show_settings_window
         ])
+        .on_window_event(|window, event| {
+            if window.label() == SETTINGS_WINDOW_LABEL {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("failed to run Kaka desktop pet");
 }
