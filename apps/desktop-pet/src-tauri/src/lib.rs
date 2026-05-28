@@ -238,7 +238,7 @@ fn open_settings_window(app: &tauri::AppHandle) -> Result<(), String> {
         WebviewUrl::App("index.html?view=settings".into()),
     )
     .title("卡咔设置")
-    .inner_size(420.0, 580.0)
+    .inner_size(420.0, 640.0)
     .resizable(false)
     .decorations(true)
     .center()

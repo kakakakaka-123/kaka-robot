@@ -45,7 +45,8 @@ type PointerSession = {
 };
 
 const CONTEXT_MENU_WIDTH = 164;
-const CONTEXT_MENU_HEIGHT = 247;
+const CONTEXT_MENU_HEIGHT = 151;
+const DEBUG_CONTEXT_MENU_HEIGHT = 322;
 const CONTEXT_MENU_MARGIN = 8;
 const PET_REACTION_DURATION_MS = 2000;
 const SPEECH_BUBBLE_DURATION_MS = 2600;
@@ -128,6 +129,7 @@ export function App() {
   const [petStateId, setPetStateId] = useState<PetStateId>("idle");
   const [contextMenu, setContextMenu] = useState(initialContextMenu);
   const [speechBubble, setSpeechBubble] = useState(initialSpeechBubble);
+  const [settings, setSettings] = useState(() => readDesktopPetSettings());
   const petStateIdRef = useRef<PetStateId>("idle");
   const stateBeforeDragRef = useRef<PetStateId>("idle");
   const pointerSessionRef = useRef<PointerSession | null>(null);
@@ -137,7 +139,7 @@ export function App() {
   const idleAmbientTimerRef = useRef<number | null>(null);
   const idleAmbientRestoreTimerRef = useRef<number | null>(null);
   const idleAmbientStateRef = useRef<PetStateId | null>(null);
-  const settingsRef = useRef(readDesktopPetSettings());
+  const settingsRef = useRef(settings);
 
   const setPetState = useCallback((nextStateId: PetStateId) => {
     petStateIdRef.current = nextStateId;
@@ -448,8 +450,9 @@ export function App() {
   const showContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
     registerActivity();
+    const menuHeight = settingsRef.current.debugStateMenuEnabled ? DEBUG_CONTEXT_MENU_HEIGHT : CONTEXT_MENU_HEIGHT;
     const maxX = window.innerWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_MARGIN;
-    const maxY = window.innerHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_MARGIN;
+    const maxY = window.innerHeight - menuHeight - CONTEXT_MENU_MARGIN;
     setContextMenu({
       visible: true,
       x: Math.max(CONTEXT_MENU_MARGIN, Math.min(event.clientX, maxX)),
@@ -472,6 +475,26 @@ export function App() {
     },
     [clearIdleAmbientRestoreTimer, clearPetReactionTimer, hideContextMenu, registerActivity, setPetState, showSpeechBubble]
   );
+
+  const openSettings = useCallback(async () => {
+    registerActivity();
+    hideContextMenu();
+    try {
+      await invoke("show_settings_window");
+    } catch {
+      showSpeechBubble("设置窗口暂时打不开。");
+    }
+  }, [hideContextMenu, registerActivity, showSpeechBubble]);
+
+  const hideMainWindow = useCallback(async () => {
+    registerActivity();
+    hideContextMenu();
+    try {
+      await invoke("set_main_window_visible", { visible: false });
+    } catch {
+      showSpeechBubble("隐藏失败了。");
+    }
+  }, [hideContextMenu, registerActivity, showSpeechBubble]);
 
   const testCoreConnection = useCallback(async () => {
     registerActivity();
@@ -551,7 +574,9 @@ export function App() {
 
   useEffect(() => {
     const applySettings = () => {
-      settingsRef.current = readDesktopPetSettings();
+      const nextSettings = readDesktopPetSettings();
+      settingsRef.current = nextSettings;
+      setSettings(nextSettings);
       if (!settingsRef.current.idleAmbientEnabled) {
         cancelIdleAmbientAction();
         clearIdleAmbientTimer();
@@ -646,40 +671,70 @@ export function App() {
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <div className="menu-actions">
+          <div className="menu-primary-actions">
             <button
               type="button"
-              className="menu-action-button connection-button"
-              onClick={() => void testCoreConnection()}
+              className="menu-action-button pet-action-button"
+              onClick={() => {
+                triggerPetReaction();
+              }}
             >
-              连接测试
+              摸摸头
             </button>
             <button
               type="button"
-              className="menu-action-button reset-position-button"
-              onClick={() => void resetWindowPosition()}
+              className="menu-action-button settings-button"
+              onClick={() => void openSettings()}
             >
-              重置位置
+              设置
+            </button>
+            <button
+              type="button"
+              className="menu-action-button hide-button"
+              onClick={() => void hideMainWindow()}
+            >
+              隐藏
+            </button>
+            <button type="button" className="menu-action-button quit-button" onClick={() => void quit()}>
+              退出
             </button>
           </div>
-          <div className="context-menu-title">切换状态</div>
-          <div className="state-menu">
-            {PET_STATE_OPTIONS.map((state) => (
-              <button
-                key={state.id}
-                type="button"
-                className={state.id === petStateId ? "active" : ""}
-                onClick={() => {
-                  selectPetState(state.id);
-                }}
-              >
-                {state.label}
-              </button>
-            ))}
-          </div>
-          <button type="button" className="quit-button" onClick={() => void quit()}>
-            退出
-          </button>
+          {settings.debugStateMenuEnabled && (
+            <div className="debug-menu-section">
+              <div className="context-menu-title">调试</div>
+              <div className="menu-actions">
+                <button
+                  type="button"
+                  className="menu-action-button connection-button"
+                  onClick={() => void testCoreConnection()}
+                >
+                  连接测试
+                </button>
+                <button
+                  type="button"
+                  className="menu-action-button reset-position-button"
+                  onClick={() => void resetWindowPosition()}
+                >
+                  重置位置
+                </button>
+              </div>
+              <div className="context-menu-title">切换状态</div>
+              <div className="state-menu">
+                {PET_STATE_OPTIONS.map((state) => (
+                  <button
+                    key={state.id}
+                    type="button"
+                    className={state.id === petStateId ? "active" : ""}
+                    onClick={() => {
+                      selectPetState(state.id);
+                    }}
+                  >
+                    {state.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </main>

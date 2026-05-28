@@ -1,6 +1,7 @@
 export type IdleSleepDelayMs = 60_000 | 120_000 | 300_000 | null;
 
 export type DesktopPetSettings = {
+  debugStateMenuEnabled: boolean;
   idleAmbientEnabled: boolean;
   idleSleepDelayMs: IdleSleepDelayMs;
 };
@@ -12,6 +13,7 @@ export const TRAY_EVENT_RESET_POSITION = "kaka-tray-reset-position";
 export const TRAY_EVENT_CHECK_CORE = "kaka-tray-check-core";
 
 export const DEFAULT_DESKTOP_PET_SETTINGS: DesktopPetSettings = {
+  debugStateMenuEnabled: false,
   idleAmbientEnabled: true,
   idleSleepDelayMs: 120_000
 };
@@ -29,6 +31,10 @@ export function readDesktopPetSettings(): DesktopPetSettings {
       : DEFAULT_DESKTOP_PET_SETTINGS.idleSleepDelayMs;
 
     return {
+      debugStateMenuEnabled:
+        typeof parsedValue.debugStateMenuEnabled === "boolean"
+          ? parsedValue.debugStateMenuEnabled
+          : DEFAULT_DESKTOP_PET_SETTINGS.debugStateMenuEnabled,
       idleAmbientEnabled:
         typeof parsedValue.idleAmbientEnabled === "boolean"
           ? parsedValue.idleAmbientEnabled

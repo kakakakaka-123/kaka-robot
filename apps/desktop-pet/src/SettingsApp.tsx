@@ -288,6 +288,21 @@ export function SettingsApp() {
           <span>启用随机待机气泡和小动作</span>
         </label>
 
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={settings.debugStateMenuEnabled}
+            disabled={pendingAction !== null}
+            onChange={(event) =>
+              void persistSettings({
+                ...settings,
+                debugStateMenuEnabled: event.currentTarget.checked
+              })
+            }
+          />
+          <span>启用右键调试状态菜单</span>
+        </label>
+
         <label className="settings-field">
           <span>闲置睡觉时间</span>
           <select
