@@ -14,7 +14,7 @@ import {
 
 type CoreStatus = "unknown" | "checking" | "ok" | "failed";
 type FeedbackTone = "info" | "success" | "error";
-type PendingAction = "autostart" | "startup" | "core" | "reset" | null;
+type PendingAction = "autostart" | "startup" | "core" | "reset" | "petWindow" | "quit" | null;
 
 type StartupSettings = {
   showPetOnAutostart: boolean;
@@ -47,6 +47,7 @@ export function SettingsApp() {
   const [settings, setSettings] = useState<DesktopPetSettings>(() => readDesktopPetSettings());
   const [startupSettings, setStartupSettings] = useState<StartupSettings>({ showPetOnAutostart: false });
   const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [mainWindowVisible, setMainWindowVisible] = useState(true);
   const [coreStatus, setCoreStatus] = useState<CoreStatus>("unknown");
   const [message, setMessage] = useState<FeedbackMessage | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
@@ -80,6 +81,15 @@ export function SettingsApp() {
       setStartupSettings(nextStartupSettings);
     } catch {
       setMessage({ tone: "error", text: "读取启动设置失败。" });
+    }
+  }, []);
+
+  const refreshMainWindowVisible = useCallback(async () => {
+    try {
+      const visible = await invoke<boolean>("get_main_window_visible");
+      setMainWindowVisible(visible);
+    } catch {
+      setMessage({ tone: "error", text: "读取桌宠窗口状态失败。" });
     }
   }, []);
 
@@ -154,10 +164,34 @@ export function SettingsApp() {
     }
   }, []);
 
+  const toggleMainWindowVisible = useCallback(async () => {
+    setPendingAction("petWindow");
+    try {
+      const visible = await invoke<boolean>("set_main_window_visible", { visible: !mainWindowVisible });
+      setMainWindowVisible(visible);
+      setMessage({ tone: "success", text: visible ? "卡咔已经显示。" : "卡咔已经隐藏到托盘。" });
+    } catch {
+      setMessage({ tone: "error", text: "桌宠窗口切换失败。" });
+    } finally {
+      setPendingAction(null);
+    }
+  }, [mainWindowVisible]);
+
+  const quit = useCallback(async () => {
+    setPendingAction("quit");
+    try {
+      await invoke("quit_app");
+    } catch {
+      setPendingAction(null);
+      setMessage({ tone: "error", text: "退出失败，可以从托盘菜单再试一次。" });
+    }
+  }, []);
+
   useEffect(() => {
     void refreshAutostart();
     void refreshStartupSettings();
-  }, [refreshAutostart, refreshStartupSettings]);
+    void refreshMainWindowVisible();
+  }, [refreshAutostart, refreshMainWindowVisible, refreshStartupSettings]);
 
   return (
     <main className="settings-shell">
@@ -171,6 +205,12 @@ export function SettingsApp() {
 
       <section className="settings-section">
         <h2>状态</h2>
+        <div className="settings-row">
+          <span>桌宠窗口</span>
+          <strong className={mainWindowVisible ? "status-value on" : "status-value neutral"}>
+            {mainWindowVisible ? "显示中" : "已隐藏"}
+          </strong>
+        </div>
         <div className="settings-row">
           <span>开机自启</span>
           <strong className={autostartEnabled ? "status-value on" : "status-value off"}>
@@ -186,6 +226,23 @@ export function SettingsApp() {
         <div className="settings-row">
           <span>核心连接</span>
           <strong className={`status-value ${coreStatusTone}`}>{coreStatusText}</strong>
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <h2>桌宠窗口</h2>
+        <div className="settings-window-actions">
+          <button type="button" disabled={pendingAction !== null} onClick={() => void toggleMainWindowVisible()}>
+            {pendingAction === "petWindow" ? "处理中..." : mainWindowVisible ? "隐藏卡咔" : "显示卡咔"}
+          </button>
+          <button
+            type="button"
+            className="settings-danger-button"
+            disabled={pendingAction !== null}
+            onClick={() => void quit()}
+          >
+            {pendingAction === "quit" ? "退出中..." : "退出卡咔"}
+          </button>
         </div>
       </section>
 

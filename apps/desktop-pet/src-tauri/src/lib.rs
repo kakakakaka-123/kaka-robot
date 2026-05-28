@@ -55,6 +55,25 @@ fn show_settings_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_main_window_visible(app: tauri::AppHandle) -> Result<bool, String> {
+    app.get_webview_window(MAIN_WINDOW_LABEL)
+        .ok_or_else(|| "main window not found".to_string())?
+        .is_visible()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_main_window_visible(app: tauri::AppHandle, visible: bool) -> Result<bool, String> {
+    if visible {
+        show_main_window(&app);
+    } else {
+        hide_main_window(&app);
+    }
+
+    get_main_window_visible(app)
+}
+
+#[tauri::command]
 fn get_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
     let enabled = app
         .autolaunch()
@@ -136,6 +155,13 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+fn hide_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.hide();
+        sync_main_window_menu(app, false);
+    }
+}
+
 fn is_started_from_autostart() -> bool {
     std::env::args().any(|arg| arg == FROM_AUTOSTART_ARG)
 }
@@ -188,8 +214,7 @@ fn toggle_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         match window.is_visible() {
             Ok(true) => {
-                let _ = window.hide();
-                sync_main_window_menu(app, false);
+                hide_main_window(app);
             }
             _ => {
                 let _ = window.show();
@@ -213,7 +238,7 @@ fn open_settings_window(app: &tauri::AppHandle) -> Result<(), String> {
         WebviewUrl::App("index.html?view=settings".into()),
     )
     .title("卡咔设置")
-    .inner_size(420.0, 520.0)
+    .inner_size(420.0, 580.0)
     .resizable(false)
     .decorations(true)
     .center()
@@ -375,9 +400,11 @@ pub fn run() {
             center_main_window,
             check_kaka_core_health,
             get_autostart_enabled,
+            get_main_window_visible,
             get_startup_settings,
             quit_app,
             set_autostart_enabled,
+            set_main_window_visible,
             set_startup_settings,
             show_settings_window
         ])

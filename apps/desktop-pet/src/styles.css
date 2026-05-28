@@ -313,7 +313,25 @@ button {
   gap: 8px;
 }
 
+.settings-window-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .settings-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d8cfd7;
+  border-radius: 7px;
+  color: #43253a;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.settings-window-actions button {
   min-height: 34px;
   padding: 0 10px;
   border: 1px solid #d8cfd7;
@@ -330,7 +348,23 @@ button {
   background: #fff4f9;
 }
 
+.settings-window-actions button:hover {
+  border-color: #c76b9a;
+  background: #fff4f9;
+}
+
+.settings-window-actions .settings-danger-button {
+  border-color: #e7b9bf;
+  color: #8a2638;
+}
+
+.settings-window-actions .settings-danger-button:hover {
+  border-color: #d68b96;
+  background: #fff0f2;
+}
+
 .settings-actions button:disabled,
+.settings-window-actions button:disabled,
 .settings-toggle input:disabled,
 .settings-field select:disabled {
   cursor: not-allowed;
