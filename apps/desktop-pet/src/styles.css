@@ -243,6 +243,36 @@ button {
   overflow-wrap: anywhere;
 }
 
+.settings-status-pill.ok,
+.status-value.ok,
+.status-value.on {
+  border-color: #b9d9cb;
+  color: #1d6150;
+  background: #e8f6ef;
+}
+
+.settings-status-pill.failed,
+.status-value.failed,
+.status-value.off {
+  border-color: #e7b9bf;
+  color: #8a2638;
+  background: #fff0f2;
+}
+
+.settings-status-pill.checking,
+.status-value.checking {
+  border-color: #d9caa7;
+  color: #77520f;
+  background: #fff7e5;
+}
+
+.status-value.neutral,
+.status-value.unknown {
+  border-color: #d8cfd7;
+  color: #4d454a;
+  background: #f3f0ee;
+}
+
 .settings-section {
   padding: 15px 0 0;
 }
@@ -265,8 +295,16 @@ button {
 }
 
 .settings-row strong {
-  color: #2f2630;
   font-size: 13px;
+}
+
+.status-value {
+  min-width: 68px;
+  padding: 4px 8px;
+  border: 1px solid #d8cfd7;
+  border-radius: 999px;
+  text-align: center;
+  line-height: 1.2;
 }
 
 .settings-actions {
@@ -290,6 +328,13 @@ button {
 .settings-actions button:hover {
   border-color: #c76b9a;
   background: #fff4f9;
+}
+
+.settings-actions button:disabled,
+.settings-toggle input:disabled,
+.settings-field select:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .settings-toggle,
@@ -335,4 +380,22 @@ button {
   background: #eef8f6;
   font-size: 13px;
   line-height: 1.3;
+}
+
+.settings-message.success {
+  border-color: #b9d9cb;
+  color: #1d6150;
+  background: #e8f6ef;
+}
+
+.settings-message.error {
+  border-color: #e7b9bf;
+  color: #8a2638;
+  background: #fff0f2;
+}
+
+.settings-message.info {
+  border-color: #bfd9d5;
+  color: #1f5a57;
+  background: #eef8f6;
 }

@@ -13,9 +13,16 @@ import {
 } from "./desktopPetSettings";
 
 type CoreStatus = "unknown" | "checking" | "ok" | "failed";
+type FeedbackTone = "info" | "success" | "error";
+type PendingAction = "autostart" | "startup" | "core" | "reset" | null;
 
 type StartupSettings = {
   showPetOnAutostart: boolean;
+};
+
+type FeedbackMessage = {
+  tone: FeedbackTone;
+  text: string;
 };
 
 const SLEEP_DELAY_OPTIONS: Array<{ label: string; value: IdleSleepDelayMs }> = [
@@ -41,7 +48,8 @@ export function SettingsApp() {
   const [startupSettings, setStartupSettings] = useState<StartupSettings>({ showPetOnAutostart: false });
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [coreStatus, setCoreStatus] = useState<CoreStatus>("unknown");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<FeedbackMessage | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
 
   const coreStatusText = useMemo(() => {
     if (coreStatus === "checking") return "检查中";
@@ -50,12 +58,19 @@ export function SettingsApp() {
     return "未检查";
   }, [coreStatus]);
 
+  const coreStatusTone = useMemo(() => {
+    if (coreStatus === "ok") return "ok";
+    if (coreStatus === "failed") return "failed";
+    if (coreStatus === "checking") return "checking";
+    return "unknown";
+  }, [coreStatus]);
+
   const refreshAutostart = useCallback(async () => {
     try {
       const enabled = await invoke<boolean>("get_autostart_enabled");
       setAutostartEnabled(enabled);
     } catch {
-      setMessage("读取开机自启状态失败。");
+      setMessage({ tone: "error", text: "读取开机自启状态失败。" });
     }
   }, []);
 
@@ -64,7 +79,7 @@ export function SettingsApp() {
       const nextStartupSettings = await invoke<StartupSettings>("get_startup_settings");
       setStartupSettings(nextStartupSettings);
     } catch {
-      setMessage("读取启动设置失败。");
+      setMessage({ tone: "error", text: "读取启动设置失败。" });
     }
   }, []);
 
@@ -75,16 +90,20 @@ export function SettingsApp() {
   }, []);
 
   const toggleAutostart = useCallback(async () => {
+    setPendingAction("autostart");
     try {
       const enabled = await invoke<boolean>("set_autostart_enabled", { enabled: !autostartEnabled });
       setAutostartEnabled(enabled);
-      setMessage(enabled ? "已开启开机自启。" : "已关闭开机自启。");
+      setMessage({ tone: "success", text: enabled ? "已开启开机自启。" : "已关闭开机自启。" });
     } catch {
-      setMessage("开机自启切换失败。");
+      setMessage({ tone: "error", text: "开机自启切换失败。" });
+    } finally {
+      setPendingAction(null);
     }
   }, [autostartEnabled]);
 
   const toggleShowPetOnAutostart = useCallback(async () => {
+    setPendingAction("startup");
     const nextStartupSettings = {
       showPetOnAutostart: !startupSettings.showPetOnAutostart
     };
@@ -95,35 +114,43 @@ export function SettingsApp() {
       setStartupSettings(savedStartupSettings);
       setMessage(
         savedStartupSettings.showPetOnAutostart
-          ? "开机自启时会显示卡咔。"
-          : "开机自启时只驻留托盘。"
+          ? { tone: "success", text: "开机自启时会显示卡咔。" }
+          : { tone: "success", text: "开机自启时只驻留托盘。" }
       );
     } catch {
-      setMessage("启动设置保存失败。");
+      setMessage({ tone: "error", text: "启动设置保存失败。" });
+    } finally {
+      setPendingAction(null);
     }
   }, [startupSettings.showPetOnAutostart]);
 
   const testCoreConnection = useCallback(async () => {
+    setPendingAction("core");
     setCoreStatus("checking");
-    setMessage("正在检查核心信号...");
+    setMessage({ tone: "info", text: "正在检查核心信号..." });
     try {
       await invoke("check_kaka_core_health");
       setCoreStatus("ok");
-      setMessage("核心信号正常。");
+      setMessage({ tone: "success", text: "核心信号正常。" });
     } catch {
       setCoreStatus("failed");
-      setMessage("信号有点弱，核心大脑没连上。");
+      setMessage({ tone: "error", text: "信号有点弱，核心大脑没连上。" });
+    } finally {
+      setPendingAction(null);
     }
   }, []);
 
   const resetWindowPosition = useCallback(async () => {
+    setPendingAction("reset");
     try {
       window.localStorage.removeItem(WINDOW_POSITION_STORAGE_KEY);
       await invoke("center_main_window");
       await emit(TRAY_EVENT_RESET_POSITION);
-      setMessage("卡咔回到屏幕中间了。");
+      setMessage({ tone: "success", text: "卡咔回到屏幕中间了。" });
     } catch {
-      setMessage("位置重置失败了。");
+      setMessage({ tone: "error", text: "位置重置失败了。" });
+    } finally {
+      setPendingAction(null);
     }
   }, []);
 
@@ -139,36 +166,40 @@ export function SettingsApp() {
           <h1>卡咔设置</h1>
           <p>常驻桌宠控制</p>
         </div>
-        <div className="settings-status-pill">{coreStatusText}</div>
+        <div className={`settings-status-pill ${coreStatusTone}`}>{coreStatusText}</div>
       </header>
 
       <section className="settings-section">
         <h2>状态</h2>
         <div className="settings-row">
           <span>开机自启</span>
-          <strong>{autostartEnabled ? "已开启" : "未开启"}</strong>
+          <strong className={autostartEnabled ? "status-value on" : "status-value off"}>
+            {autostartEnabled ? "已开启" : "未开启"}
+          </strong>
         </div>
         <div className="settings-row">
           <span>自启显示卡咔</span>
-          <strong>{startupSettings.showPetOnAutostart ? "显示" : "只驻留托盘"}</strong>
+          <strong className={startupSettings.showPetOnAutostart ? "status-value on" : "status-value neutral"}>
+            {startupSettings.showPetOnAutostart ? "显示" : "只驻留托盘"}
+          </strong>
         </div>
         <div className="settings-row">
           <span>核心连接</span>
-          <strong>{coreStatusText}</strong>
+          <strong className={`status-value ${coreStatusTone}`}>{coreStatusText}</strong>
         </div>
       </section>
 
       <section className="settings-section">
         <h2>常用操作</h2>
         <div className="settings-actions">
-          <button type="button" onClick={() => void toggleAutostart()}>
-            {autostartEnabled ? "关闭开机自启" : "开启开机自启"}
+          <button type="button" disabled={pendingAction !== null} onClick={() => void toggleAutostart()}>
+            {pendingAction === "autostart" ? "处理中..." : autostartEnabled ? "关闭开机自启" : "开启开机自启"}
           </button>
-          <button type="button" onClick={() => void testCoreConnection()}>
-            连接测试
+          <button type="button" disabled={pendingAction !== null} onClick={() => void testCoreConnection()}>
+            {pendingAction === "core" ? "检查中..." : "连接测试"}
           </button>
-          <button type="button" onClick={() => void resetWindowPosition()}>
-            重置位置
+          <button type="button" disabled={pendingAction !== null} onClick={() => void resetWindowPosition()}>
+            {pendingAction === "reset" ? "重置中..." : "重置位置"}
           </button>
         </div>
       </section>
@@ -179,6 +210,7 @@ export function SettingsApp() {
           <input
             type="checkbox"
             checked={startupSettings.showPetOnAutostart}
+            disabled={pendingAction !== null}
             onChange={() => void toggleShowPetOnAutostart()}
           />
           <span>开机自启时显示卡咔</span>
@@ -188,6 +220,7 @@ export function SettingsApp() {
           <input
             type="checkbox"
             checked={settings.idleAmbientEnabled}
+            disabled={pendingAction !== null}
             onChange={(event) =>
               void persistSettings({
                 ...settings,
@@ -202,6 +235,7 @@ export function SettingsApp() {
           <span>闲置睡觉时间</span>
           <select
             value={sleepDelayToInputValue(settings.idleSleepDelayMs)}
+            disabled={pendingAction !== null}
             onChange={(event) =>
               void persistSettings({
                 ...settings,
@@ -218,7 +252,7 @@ export function SettingsApp() {
         </label>
       </section>
 
-      {message && <div className="settings-message">{message}</div>}
+      {message && <div className={`settings-message ${message.tone}`}>{message.text}</div>}
     </main>
   );
 }
