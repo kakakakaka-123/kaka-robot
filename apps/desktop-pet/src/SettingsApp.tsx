@@ -14,6 +14,10 @@ import {
 
 type CoreStatus = "unknown" | "checking" | "ok" | "failed";
 
+type StartupSettings = {
+  showPetOnAutostart: boolean;
+};
+
 const SLEEP_DELAY_OPTIONS: Array<{ label: string; value: IdleSleepDelayMs }> = [
   { label: "1 分钟", value: 60_000 },
   { label: "2 分钟", value: 120_000 },
@@ -34,6 +38,7 @@ function inputValueToSleepDelay(value: string): IdleSleepDelayMs {
 
 export function SettingsApp() {
   const [settings, setSettings] = useState<DesktopPetSettings>(() => readDesktopPetSettings());
+  const [startupSettings, setStartupSettings] = useState<StartupSettings>({ showPetOnAutostart: false });
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [coreStatus, setCoreStatus] = useState<CoreStatus>("unknown");
   const [message, setMessage] = useState("");
@@ -54,6 +59,15 @@ export function SettingsApp() {
     }
   }, []);
 
+  const refreshStartupSettings = useCallback(async () => {
+    try {
+      const nextStartupSettings = await invoke<StartupSettings>("get_startup_settings");
+      setStartupSettings(nextStartupSettings);
+    } catch {
+      setMessage("读取启动设置失败。");
+    }
+  }, []);
+
   const persistSettings = useCallback(async (nextSettings: DesktopPetSettings) => {
     setSettings(nextSettings);
     writeDesktopPetSettings(nextSettings);
@@ -69,6 +83,25 @@ export function SettingsApp() {
       setMessage("开机自启切换失败。");
     }
   }, [autostartEnabled]);
+
+  const toggleShowPetOnAutostart = useCallback(async () => {
+    const nextStartupSettings = {
+      showPetOnAutostart: !startupSettings.showPetOnAutostart
+    };
+    try {
+      const savedStartupSettings = await invoke<StartupSettings>("set_startup_settings", {
+        settings: nextStartupSettings
+      });
+      setStartupSettings(savedStartupSettings);
+      setMessage(
+        savedStartupSettings.showPetOnAutostart
+          ? "开机自启时会显示卡咔。"
+          : "开机自启时只驻留托盘。"
+      );
+    } catch {
+      setMessage("启动设置保存失败。");
+    }
+  }, [startupSettings.showPetOnAutostart]);
 
   const testCoreConnection = useCallback(async () => {
     setCoreStatus("checking");
@@ -96,7 +129,8 @@ export function SettingsApp() {
 
   useEffect(() => {
     void refreshAutostart();
-  }, [refreshAutostart]);
+    void refreshStartupSettings();
+  }, [refreshAutostart, refreshStartupSettings]);
 
   return (
     <main className="settings-shell">
@@ -113,6 +147,10 @@ export function SettingsApp() {
         <div className="settings-row">
           <span>开机自启</span>
           <strong>{autostartEnabled ? "已开启" : "未开启"}</strong>
+        </div>
+        <div className="settings-row">
+          <span>自启显示卡咔</span>
+          <strong>{startupSettings.showPetOnAutostart ? "显示" : "只驻留托盘"}</strong>
         </div>
         <div className="settings-row">
           <span>核心连接</span>
@@ -137,6 +175,15 @@ export function SettingsApp() {
 
       <section className="settings-section">
         <h2>行为</h2>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={startupSettings.showPetOnAutostart}
+            onChange={() => void toggleShowPetOnAutostart()}
+          />
+          <span>开机自启时显示卡咔</span>
+        </label>
+
         <label className="settings-toggle">
           <input
             type="checkbox"

@@ -1,8 +1,11 @@
+use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, EventTarget, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -18,10 +21,26 @@ const TRAY_MENU_CHECK_CORE: &str = "tray-check-core";
 const TRAY_MENU_QUIT: &str = "tray-quit";
 const TRAY_EVENT_RESET_POSITION: &str = "kaka-tray-reset-position";
 const TRAY_EVENT_CHECK_CORE: &str = "kaka-tray-check-core";
+const FROM_AUTOSTART_ARG: &str = "--from-autostart";
+const STARTUP_SETTINGS_FILE_NAME: &str = "desktop-pet-startup.json";
 
 #[derive(Default)]
 struct TrayState {
     autostart_item: Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartupSettings {
+    show_pet_on_autostart: bool,
+}
+
+impl Default for StartupSettings {
+    fn default() -> Self {
+        Self {
+            show_pet_on_autostart: false,
+        }
+    }
 }
 
 #[tauri::command]
@@ -44,6 +63,20 @@ fn get_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
 #[tauri::command]
 fn set_autostart_enabled(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
     set_autostart_enabled_internal(&app, enabled)
+}
+
+#[tauri::command]
+fn get_startup_settings(app: tauri::AppHandle) -> Result<StartupSettings, String> {
+    read_startup_settings(&app)
+}
+
+#[tauri::command]
+fn set_startup_settings(
+    app: tauri::AppHandle,
+    settings: StartupSettings,
+) -> Result<StartupSettings, String> {
+    write_startup_settings(&app, settings)?;
+    Ok(settings)
 }
 
 #[tauri::command]
@@ -95,6 +128,52 @@ fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+fn is_started_from_autostart() -> bool {
+    std::env::args().any(|arg| arg == FROM_AUTOSTART_ARG)
+}
+
+fn startup_settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?
+        .join(STARTUP_SETTINGS_FILE_NAME))
+}
+
+fn read_startup_settings(app: &tauri::AppHandle) -> Result<StartupSettings, String> {
+    let path = startup_settings_path(app)?;
+    if !path.exists() {
+        return Ok(StartupSettings::default());
+    }
+
+    let raw_value = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    serde_json::from_str(&raw_value).map_err(|error| error.to_string())
+}
+
+fn write_startup_settings(
+    app: &tauri::AppHandle,
+    settings: StartupSettings,
+) -> Result<(), String> {
+    let path = startup_settings_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    let raw_value = serde_json::to_string_pretty(&settings).map_err(|error| error.to_string())?;
+    fs::write(path, raw_value).map_err(|error| error.to_string())
+}
+
+fn apply_initial_main_window_visibility(app: &tauri::AppHandle) {
+    let should_show = !is_started_from_autostart()
+        || read_startup_settings(app)
+            .map(|settings| settings.show_pet_on_autostart)
+            .unwrap_or(false);
+
+    if should_show {
+        show_main_window(app);
     }
 }
 
@@ -159,6 +238,7 @@ fn sync_autostart_menu(app: &tauri::AppHandle, enabled: bool) {
 fn set_autostart_enabled_internal(app: &tauri::AppHandle, enabled: bool) -> Result<bool, String> {
     let autolaunch = app.autolaunch();
     let result = if enabled {
+        let _ = autolaunch.disable();
         autolaunch.enable()
     } else {
         autolaunch.disable()
@@ -170,6 +250,12 @@ fn set_autostart_enabled_internal(app: &tauri::AppHandle, enabled: bool) -> Resu
         .map_err(|error| error.to_string())?;
     sync_autostart_menu(app, current_enabled);
     Ok(current_enabled)
+}
+
+fn refresh_autostart_registration(app: &tauri::AppHandle) {
+    if app.autolaunch().is_enabled().unwrap_or(false) {
+        let _ = set_autostart_enabled_internal(app, true);
+    }
 }
 
 fn toggle_autostart(app: &tauri::AppHandle) {
@@ -250,18 +336,22 @@ pub fn run() {
         .manage(TrayState::default())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
-            None,
+            Some(vec![FROM_AUTOSTART_ARG]),
         ))
         .setup(|app| {
             setup_tray(app)?;
+            refresh_autostart_registration(app.handle());
+            apply_initial_main_window_visibility(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             center_main_window,
             check_kaka_core_health,
             get_autostart_enabled,
+            get_startup_settings,
             quit_app,
             set_autostart_enabled,
+            set_startup_settings,
             show_settings_window
         ])
         .run(tauri::generate_context!())
