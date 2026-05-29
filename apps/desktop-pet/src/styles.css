@@ -272,7 +272,7 @@ button {
 
 .conversation-history {
   display: grid;
-  max-height: 92px;
+  max-height: 112px;
   margin-bottom: 7px;
   padding-right: 2px;
   gap: 4px;
@@ -301,11 +301,10 @@ button {
 .conversation-history-text {
   min-width: 0;
   color: #373039;
-  overflow: hidden;
   overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .conversation-history-item.failed .conversation-history-text {
