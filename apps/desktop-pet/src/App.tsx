@@ -12,6 +12,19 @@ import {
   WINDOW_POSITION_STORAGE_KEY
 } from "./desktopPetSettings";
 import { PetCanvas } from "./PetCanvas";
+import {
+  createPetBehaviorMemory,
+  getDoubleTouchReaction,
+  getDragEndReaction,
+  getIdleAmbientReaction,
+  getLongDragReaction,
+  getLongPressReaction,
+  getSleepReaction,
+  getStateBubbleText,
+  getTouchReaction,
+  getWakeReaction,
+  type PetBehaviorReaction
+} from "./petBehavior";
 import { PET_STATE_OPTIONS, PET_STATES, type PetStateId } from "./petStates";
 
 type ContextMenuState = {
@@ -35,8 +48,11 @@ type PointerSession = {
   startX: number;
   startY: number;
   dragging: boolean;
+  longDragNotified: boolean;
+  longPressTriggered: boolean;
   windowMoveInFlight: boolean;
   pendingWindowMove: boolean;
+  dragStartedAt?: number;
   dragOrigin?: {
     cursorX: number;
     cursorY: number;
@@ -45,17 +61,14 @@ type PointerSession = {
   };
 };
 
-type PetTouchReaction = {
-  stateId: Extract<PetStateId, "pet" | "happy" | "thinking">;
-  text: string;
-  durationMs: number;
-};
-
 const CONTEXT_MENU_WIDTH = 164;
 const CONTEXT_MENU_HEIGHT = 151;
 const DEBUG_CONTEXT_MENU_HEIGHT = 322;
 const CONTEXT_MENU_MARGIN = 8;
 const POINTER_DRAG_THRESHOLD_PX = 6;
+const DOUBLE_TOUCH_WINDOW_MS = 260;
+const LONG_PRESS_DELAY_MS = 720;
+const LONG_DRAG_DELAY_MS = 4200;
 const IDLE_AMBIENT_DELAY_MS = {
   low: { min: 90 * 1000, max: 180 * 1000 },
   normal: { min: 45 * 1000, max: 120 * 1000 },
@@ -72,49 +85,6 @@ const initialSpeechBubble: SpeechBubbleState = {
   visible: false,
   text: ""
 };
-
-const PET_STATE_BUBBLE_TEXT: Partial<Record<PetStateId, string>> = {
-  idle: "我在这儿。",
-  happy: "今天心情不错！",
-  sleepy: "有点困困的...",
-  thinking: "让我想一想。",
-  angry: "哼，卡咔炸毛了！",
-  dead404: "卡咔暂时离线。",
-  message: "收到新消息了。",
-  sleep: "我先睡一会儿...",
-  pet: "嘿嘿，再摸一下。",
-  loading: "卡咔加载中...",
-  weakSignal: "信号有点弱。"
-};
-
-const IDLE_AMBIENT_BUBBLES = [
-  "我还在这里。",
-  "桌面风平浪静。",
-  "卡咔巡视中。",
-  "今天也要好好运行。",
-  "有事可以摸摸我。",
-  "我在旁边待机。"
-] as const;
-
-const PET_TOUCH_REACTIONS: readonly PetTouchReaction[] = [
-  { stateId: "pet", text: "嘿嘿，再摸一下。", durationMs: 2100 },
-  { stateId: "happy", text: "收到摸头，心情加一格。", durationMs: 2400 },
-  { stateId: "pet", text: "尾巴要藏好。", durationMs: 2200 },
-  { stateId: "thinking", text: "摸头会提高缓存命中率吗...", durationMs: 2600 },
-  { stateId: "happy", text: "今天允许你多摸两下。", durationMs: 2400 }
-] as const;
-
-const WAKE_BUBBLES = ["唔...我醒啦。", "刚才睡得很轻。", "卡咔重新上线。"] as const;
-const DRAG_END_BUBBLES = ["放好啦。", "这个位置也不错。", "卡咔已停稳。"] as const;
-
-const IDLE_AMBIENT_ACTIONS: Array<{
-  stateId: Extract<PetStateId, "happy" | "thinking" | "sleepy">;
-  durationMs: number;
-}> = [
-  { stateId: "happy", durationMs: 3200 },
-  { stateId: "thinking", durationMs: 4200 },
-  { stateId: "sleepy", durationMs: 5200 }
-];
 
 function readStoredWindowPosition(): StoredWindowPosition | null {
   try {
@@ -141,10 +111,6 @@ function getRandomInt(min: number, max: number): number {
   return Math.floor(window.crypto.getRandomValues(new Uint32Array(1))[0] / (0xffffffff + 1) * (max - min + 1)) + min;
 }
 
-function pickRandomItem<T>(items: readonly T[]): T {
-  return items[getRandomInt(0, items.length - 1)];
-}
-
 export function App() {
   const [petStateId, setPetStateId] = useState<PetStateId>("idle");
   const [contextMenu, setContextMenu] = useState(initialContextMenu);
@@ -152,9 +118,13 @@ export function App() {
   const [settings, setSettings] = useState(() => readDesktopPetSettings());
   const petStateIdRef = useRef<PetStateId>("idle");
   const stateBeforeDragRef = useRef<PetStateId>("idle");
+  const behaviorMemoryRef = useRef(createPetBehaviorMemory());
   const pointerSessionRef = useRef<PointerSession | null>(null);
   const petReactionTimerRef = useRef<number | null>(null);
   const speechBubbleTimerRef = useRef<number | null>(null);
+  const touchReactionTimerRef = useRef<number | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const doubleTouchPointerIdRef = useRef<number | null>(null);
   const idleTimerRef = useRef<number | null>(null);
   const idleAmbientTimerRef = useRef<number | null>(null);
   const idleAmbientRestoreTimerRef = useRef<number | null>(null);
@@ -176,6 +146,18 @@ export function App() {
     if (speechBubbleTimerRef.current === null) return;
     window.clearTimeout(speechBubbleTimerRef.current);
     speechBubbleTimerRef.current = null;
+  }, []);
+
+  const clearTouchReactionTimer = useCallback(() => {
+    if (touchReactionTimerRef.current === null) return;
+    window.clearTimeout(touchReactionTimerRef.current);
+    touchReactionTimerRef.current = null;
+  }, []);
+
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current === null) return;
+    window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
   }, []);
 
   const clearIdleTimer = useCallback(() => {
@@ -206,7 +188,7 @@ export function App() {
   }, [clearSpeechBubbleTimer]);
 
   const showSpeechBubble = useCallback(
-    (text: string, durationMs = settingsRef.current.speechBubbleDurationMs) => {
+    (text: string, durationMs: number = settingsRef.current.speechBubbleDurationMs) => {
       clearSpeechBubbleTimer();
       setSpeechBubble({ visible: true, text });
       speechBubbleTimerRef.current = window.setTimeout(() => {
@@ -215,6 +197,26 @@ export function App() {
       }, durationMs);
     },
     [clearSpeechBubbleTimer]
+  );
+
+  const playPetReaction = useCallback(
+    (reaction: PetBehaviorReaction, restoreState = true) => {
+      clearPetReactionTimer();
+      if (reaction.stateId) {
+        setPetState(reaction.stateId);
+      }
+      showSpeechBubble(reaction.text, reaction.durationMs);
+
+      if (!restoreState || !reaction.stateId) return;
+
+      petReactionTimerRef.current = window.setTimeout(() => {
+        if (reaction.stateId && petStateIdRef.current === reaction.stateId) {
+          setPetState("idle");
+        }
+        petReactionTimerRef.current = null;
+      }, reaction.durationMs);
+    },
+    [clearPetReactionTimer, setPetState, showSpeechBubble]
   );
 
   const applyWindowSettings = useCallback((nextSettings: DesktopPetSettings) => {
@@ -245,25 +247,21 @@ export function App() {
         return;
       }
 
-      if (getRandomInt(0, 1) === 0) {
-        showSpeechBubble(pickRandomItem(IDLE_AMBIENT_BUBBLES));
-      } else {
-        const action = pickRandomItem(IDLE_AMBIENT_ACTIONS);
-        idleAmbientStateRef.current = action.stateId;
-        setPetState(action.stateId);
-        const bubbleText = PET_STATE_BUBBLE_TEXT[action.stateId];
-        if (bubbleText) {
-          showSpeechBubble(bubbleText);
-        }
-
+      const reaction = getIdleAmbientReaction(behaviorMemoryRef.current);
+      if (reaction.stateId) {
+        idleAmbientStateRef.current = reaction.stateId;
+        setPetState(reaction.stateId);
+        showSpeechBubble(reaction.text, reaction.durationMs);
         clearIdleAmbientRestoreTimer();
         idleAmbientRestoreTimerRef.current = window.setTimeout(() => {
-          if (idleAmbientStateRef.current === action.stateId && petStateIdRef.current === action.stateId) {
+          if (idleAmbientStateRef.current === reaction.stateId && petStateIdRef.current === reaction.stateId) {
             setPetState("idle");
           }
           idleAmbientStateRef.current = null;
           idleAmbientRestoreTimerRef.current = null;
-        }, action.durationMs);
+        }, reaction.durationMs);
+      } else {
+        showSpeechBubble(reaction.text, reaction.durationMs);
       }
 
       scheduleIdleAmbient();
@@ -282,10 +280,15 @@ export function App() {
     if (idleSleepDelayMs === null) return;
 
     idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = null;
       clearPetReactionTimer();
       if (petStateIdRef.current !== "drag") {
-        showSpeechBubble(PET_STATE_BUBBLE_TEXT.sleep ?? "我先睡一会儿...");
-        setPetState("sleep");
+        const reaction = getSleepReaction(behaviorMemoryRef.current);
+        if (!reaction) {
+          return;
+        }
+        setPetState(reaction.stateId ?? "sleep");
+        showSpeechBubble(reaction.text, reaction.durationMs);
       }
     }, idleSleepDelayMs);
   }, [clearIdleTimer, clearPetReactionTimer, setPetState, showSpeechBubble]);
@@ -296,7 +299,8 @@ export function App() {
     resetIdleTimer();
     if (wasSleeping) {
       setPetState("idle");
-      showSpeechBubble(pickRandomItem(WAKE_BUBBLES));
+      const reaction = getWakeReaction(behaviorMemoryRef.current);
+      showSpeechBubble(reaction.text, reaction.durationMs);
     }
   }, [cancelIdleAmbientAction, resetIdleTimer, setPetState, showSpeechBubble]);
 
@@ -385,17 +389,50 @@ export function App() {
   const triggerPetReaction = useCallback(() => {
     hideContextMenu();
     registerActivity();
-    clearPetReactionTimer();
-    const reaction = pickRandomItem(PET_TOUCH_REACTIONS);
-    setPetState(reaction.stateId);
-    showSpeechBubble(reaction.text);
-    petReactionTimerRef.current = window.setTimeout(() => {
-      if (petStateIdRef.current === reaction.stateId) {
-        setPetState("idle");
-      }
-      petReactionTimerRef.current = null;
-    }, reaction.durationMs);
-  }, [clearPetReactionTimer, hideContextMenu, registerActivity, setPetState, showSpeechBubble]);
+    clearLongPressTimer();
+    clearTouchReactionTimer();
+    playPetReaction(getTouchReaction(behaviorMemoryRef.current));
+  }, [clearLongPressTimer, clearTouchReactionTimer, hideContextMenu, playPetReaction, registerActivity]);
+
+  const queueTouchReaction = useCallback(() => {
+    clearLongPressTimer();
+    touchReactionTimerRef.current = window.setTimeout(() => {
+      touchReactionTimerRef.current = null;
+      playPetReaction(getTouchReaction(behaviorMemoryRef.current));
+    }, DOUBLE_TOUCH_WINDOW_MS);
+  }, [clearLongPressTimer, playPetReaction]);
+
+  const triggerDoubleTouchReaction = useCallback(() => {
+    clearLongPressTimer();
+    clearTouchReactionTimer();
+    doubleTouchPointerIdRef.current = null;
+    playPetReaction(getDoubleTouchReaction(behaviorMemoryRef.current));
+  }, [clearLongPressTimer, clearTouchReactionTimer, playPetReaction]);
+
+  const triggerLongPressReaction = useCallback(
+    (pointerId: number) => {
+      const pointerSession = pointerSessionRef.current;
+      if (!pointerSession || pointerSession.pointerId !== pointerId || pointerSession.dragging) return;
+
+      pointerSession.longPressTriggered = true;
+      doubleTouchPointerIdRef.current = null;
+      clearTouchReactionTimer();
+      playPetReaction(getLongPressReaction(behaviorMemoryRef.current));
+    },
+    [clearTouchReactionTimer, playPetReaction]
+  );
+
+  const maybeTriggerLongDragReaction = useCallback(() => {
+    const pointerSession = pointerSessionRef.current;
+    if (!pointerSession?.dragging || pointerSession.longDragNotified || pointerSession.dragStartedAt === undefined) {
+      return;
+    }
+
+    if (window.performance.now() - pointerSession.dragStartedAt < LONG_DRAG_DELAY_MS) return;
+
+    pointerSession.longDragNotified = true;
+    playPetReaction(getLongDragReaction(behaviorMemoryRef.current), false);
+  }, [playPetReaction]);
 
   const beginPetPointer = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -408,13 +445,26 @@ export function App() {
         startX: event.clientX,
         startY: event.clientY,
         dragging: false,
+        longDragNotified: false,
+        longPressTriggered: false,
         windowMoveInFlight: false,
         pendingWindowMove: false
       };
+      if (touchReactionTimerRef.current !== null) {
+        clearTouchReactionTimer();
+        doubleTouchPointerIdRef.current = event.pointerId;
+      } else {
+        doubleTouchPointerIdRef.current = null;
+      }
+      clearLongPressTimer();
+      longPressTimerRef.current = window.setTimeout(() => {
+        longPressTimerRef.current = null;
+        triggerLongPressReaction(event.pointerId);
+      }, LONG_PRESS_DELAY_MS);
       hideContextMenu();
       registerActivity();
     },
-    [hideContextMenu, registerActivity]
+    [clearLongPressTimer, clearTouchReactionTimer, hideContextMenu, registerActivity, triggerLongPressReaction]
   );
 
   const movePetPointer = useCallback(
@@ -423,6 +473,7 @@ export function App() {
       if (!pointerSession || pointerSession.pointerId !== event.pointerId) return;
 
       if (pointerSession.dragging) {
+        maybeTriggerLongDragReaction();
         void moveWindowToCursor();
         return;
       }
@@ -432,9 +483,12 @@ export function App() {
       if (Math.hypot(deltaX, deltaY) < POINTER_DRAG_THRESHOLD_PX) return;
 
       pointerSession.dragging = true;
+      pointerSession.dragStartedAt = window.performance.now();
+      doubleTouchPointerIdRef.current = null;
+      clearLongPressTimer();
       void startWindowDrag();
     },
-    [moveWindowToCursor, startWindowDrag]
+    [clearLongPressTimer, maybeTriggerLongDragReaction, moveWindowToCursor, startWindowDrag]
   );
 
   const endPetPointer = useCallback(
@@ -443,19 +497,33 @@ export function App() {
       if (!pointerSession || pointerSession.pointerId !== event.pointerId) return;
 
       pointerSessionRef.current = null;
+      clearLongPressTimer();
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
 
       if (pointerSession.dragging) {
+        doubleTouchPointerIdRef.current = null;
         restoreStateAfterDrag();
-        showSpeechBubble(pickRandomItem(DRAG_END_BUBBLES));
+        const reaction = getDragEndReaction(behaviorMemoryRef.current);
+        showSpeechBubble(reaction.text, reaction.durationMs);
         window.setTimeout(() => void saveWindowPosition(), 80);
+      } else if (pointerSession.longPressTriggered) {
+        doubleTouchPointerIdRef.current = null;
+      } else if (doubleTouchPointerIdRef.current === event.pointerId) {
+        triggerDoubleTouchReaction();
       } else {
-        triggerPetReaction();
+        queueTouchReaction();
       }
     },
-    [restoreStateAfterDrag, saveWindowPosition, showSpeechBubble, triggerPetReaction]
+    [
+      clearLongPressTimer,
+      queueTouchReaction,
+      restoreStateAfterDrag,
+      saveWindowPosition,
+      showSpeechBubble,
+      triggerDoubleTouchReaction
+    ]
   );
 
   const cancelPetPointer = useCallback(
@@ -464,6 +532,8 @@ export function App() {
       if (!pointerSession || pointerSession.pointerId !== event.pointerId) return;
 
       pointerSessionRef.current = null;
+      doubleTouchPointerIdRef.current = null;
+      clearLongPressTimer();
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
@@ -472,7 +542,7 @@ export function App() {
         window.setTimeout(() => void saveWindowPosition(), 80);
       }
     },
-    [restoreStateAfterDrag, saveWindowPosition]
+    [clearLongPressTimer, restoreStateAfterDrag, saveWindowPosition]
   );
 
   const showContextMenu = useCallback((event: React.MouseEvent) => {
@@ -495,7 +565,7 @@ export function App() {
       idleAmbientStateRef.current = null;
       clearPetReactionTimer();
       setPetState(stateId);
-      const bubbleText = PET_STATE_BUBBLE_TEXT[stateId];
+      const bubbleText = getStateBubbleText(stateId);
       if (bubbleText) {
         showSpeechBubble(bubbleText);
       }
@@ -647,14 +717,18 @@ export function App() {
       clearIdleAmbientRestoreTimer();
       idleAmbientStateRef.current = null;
       clearPetReactionTimer();
+      clearTouchReactionTimer();
+      clearLongPressTimer();
       clearSpeechBubbleTimer();
     };
   }, [
     clearIdleAmbientRestoreTimer,
     clearIdleAmbientTimer,
     clearIdleTimer,
+    clearLongPressTimer,
     clearPetReactionTimer,
     clearSpeechBubbleTimer,
+    clearTouchReactionTimer,
     resetIdleTimer,
     scheduleIdleAmbient
   ]);
