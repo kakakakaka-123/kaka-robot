@@ -148,6 +148,8 @@ web-console：npm run build passed
 2026-05-28 desktop-pet 托盘维护入口和交互质感增强：阶段测试 `npm run build` passed；`cargo check` passed；`cargo test` passed；最终 `git diff --check` passed（仅 CRLF 提示）；`npm run tauri:build` passed；release exe 已启动验证
 2026-05-29 desktop-pet 外观和行为设置增强：`npm run build` passed；`cargo check` passed；`cargo test` passed；`git diff --check` passed（仅 CRLF 提示）；`npm run tauri:build` passed；release exe 已启动验证
 2026-05-29 desktop-pet 互动行为增强第二阶段：`npm run build` passed；`cargo check` passed；`cargo test` passed；`git diff --check` passed（仅 CRLF 提示）；`npm run tauri:build` passed；release exe 已启动验证
+2026-05-29 用户实测：桌宠单击、双击、长按、连续摸头和长拖拽手感无问题
+2026-05-29 desktop-pet 托盘可靠性收尾：Windows UI Automation 可定位真实托盘图标；托盘图标左键显示/隐藏链路可触发；重启逻辑已做等价进程级验证，当前 release 实例 PID 27584；Windows 11 隐藏托盘右键菜单自动化点选不稳定，`修复窗口` / `重启桌宠` 仍建议用户手动最终确认
 用户 2026-05-05 实测：当前真实链路暂无大问题
 真实数据库状态写入验证：通过
 浏览器管理台回放：通过
@@ -181,7 +183,7 @@ memory_candidates.id=42 -> approved -> rejected -> approved
 下一个对话框最应该继续做：
 
 ```text
-先阅读本交接文档和 docs/下次上下文.md；如果继续桌宠方向，优先阅读 `docs/桌宠开发说明.md`。当前建议先实测单击、双击、长按、连续摸头和长拖拽手感，再实测托盘的修复窗口和重启桌宠；方便重启电脑后再做开机自启真实重启回归测试。暂时不急着接完整大模型聊天。如果后续明确要做桌宠对话，再做 `apps/desktop-pet` 到 `kaka-core /v1/chat` 的最小接入：固定输入或小输入框 -> `platform=desktop` 的 `MessageEvent` -> 气泡显示回复 -> 根据请求/回复/失败切换加载中、收到消息、开心或信号弱。如果继续人设调试，优先阅读 `prompts/kaka_persona.md`、docs/卡咔人设设定.md、docs/卡咔场景反应样例.md、docs/卡咔负面情绪处理规则.md；当前运行 Prompt 已经过真实 LLM 小样本回放和真实 QQ 群聊回放，下一步继续小范围观察“甜但不腻、短但不冷、无动作、同群 bot 友好共存”是否稳定；如果继续功能验收，检查正式记忆倒序分页、新增、编辑、归档、恢复、硬删除、提示预演和对话复盘；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再观察自动候选分析、自动候选区复核、回复时长期记忆使用是否稳定
+先阅读本交接文档和 docs/下次上下文.md；如果继续桌宠方向，优先阅读 `docs/桌宠开发说明.md`。当前建议用户手动右键托盘最终确认一次 `修复窗口` 和 `重启桌宠`；方便重启电脑后再做开机自启真实重启回归测试。暂时不急着接完整大模型聊天。如果后续明确要做桌宠对话，再做 `apps/desktop-pet` 到 `kaka-core /v1/chat` 的最小接入：固定输入或小输入框 -> `platform=desktop` 的 `MessageEvent` -> 气泡显示回复 -> 根据请求/回复/失败切换加载中、收到消息、开心或信号弱。如果继续人设调试，优先阅读 `prompts/kaka_persona.md`、docs/卡咔人设设定.md、docs/卡咔场景反应样例.md、docs/卡咔负面情绪处理规则.md；当前运行 Prompt 已经过真实 LLM 小样本回放和真实 QQ 群聊回放，下一步继续小范围观察“甜但不腻、短但不冷、无动作、同群 bot 友好共存”是否稳定；如果继续功能验收，检查正式记忆倒序分页、新增、编辑、归档、恢复、硬删除、提示预演和对话复盘；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再观察自动候选分析、自动候选区复核、回复时长期记忆使用是否稳定
 ```
 
 第一目标仍然只做文本：
