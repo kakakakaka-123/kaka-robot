@@ -11,6 +11,12 @@ import {
   TRAY_EVENT_RESET_POSITION,
   WINDOW_POSITION_STORAGE_KEY
 } from "./desktopPetSettings";
+import {
+  getChatBubbleDurationMs,
+  getChatFailureBubbleText,
+  getChatReplyState,
+  splitChatReplyIntoBubbles
+} from "./chatPresentation";
 import { PetCanvas } from "./PetCanvas";
 import {
   createPetBehaviorMemory,
@@ -70,7 +76,6 @@ const DOUBLE_TOUCH_WINDOW_MS = 260;
 const LONG_PRESS_DELAY_MS = 720;
 const LONG_DRAG_DELAY_MS = 4200;
 const MAX_CONVERSATION_INPUT_LENGTH = 80;
-const MAX_CHAT_REPLY_BUBBLE_LENGTH = 120;
 const CONVERSATION_RESTORE_DELAY_MS = 1800;
 const IDLE_AMBIENT_DELAY_MS = {
   low: { min: 90 * 1000, max: 180 * 1000 },
@@ -114,13 +119,6 @@ function getRandomInt(min: number, max: number): number {
   return Math.floor(window.crypto.getRandomValues(new Uint32Array(1))[0] / (0xffffffff + 1) * (max - min + 1)) + min;
 }
 
-function formatChatReplyForBubble(text: string): string {
-  const normalizedText = text.replace(/\s+/g, " ").trim();
-  if (!normalizedText) return "卡咔听到了。";
-  if (normalizedText.length <= MAX_CHAT_REPLY_BUBBLE_LENGTH) return normalizedText;
-  return `${normalizedText.slice(0, MAX_CHAT_REPLY_BUBBLE_LENGTH)}...`;
-}
-
 export function App() {
   const [petStateId, setPetStateId] = useState<PetStateId>("idle");
   const [contextMenu, setContextMenu] = useState(initialContextMenu);
@@ -137,6 +135,7 @@ export function App() {
   const conversationActiveRef = useRef(false);
   const petReactionTimerRef = useRef<number | null>(null);
   const speechBubbleTimerRef = useRef<number | null>(null);
+  const chatReplySequenceTimerRef = useRef<number | null>(null);
   const touchReactionTimerRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const conversationRestoreTimerRef = useRef<number | null>(null);
@@ -162,6 +161,12 @@ export function App() {
     if (speechBubbleTimerRef.current === null) return;
     window.clearTimeout(speechBubbleTimerRef.current);
     speechBubbleTimerRef.current = null;
+  }, []);
+
+  const clearChatReplySequenceTimer = useCallback(() => {
+    if (chatReplySequenceTimerRef.current === null) return;
+    window.clearTimeout(chatReplySequenceTimerRef.current);
+    chatReplySequenceTimerRef.current = null;
   }, []);
 
   const clearTouchReactionTimer = useCallback(() => {
@@ -205,12 +210,14 @@ export function App() {
   }, []);
 
   const hideSpeechBubble = useCallback(() => {
+    clearChatReplySequenceTimer();
     clearSpeechBubbleTimer();
     setSpeechBubble(initialSpeechBubble);
-  }, [clearSpeechBubbleTimer]);
+  }, [clearChatReplySequenceTimer, clearSpeechBubbleTimer]);
 
   const showSpeechBubble = useCallback(
     (text: string, durationMs: number = settingsRef.current.speechBubbleDurationMs) => {
+      clearChatReplySequenceTimer();
       clearSpeechBubbleTimer();
       setSpeechBubble({ visible: true, text });
       speechBubbleTimerRef.current = window.setTimeout(() => {
@@ -218,7 +225,42 @@ export function App() {
         speechBubbleTimerRef.current = null;
       }, durationMs);
     },
-    [clearSpeechBubbleTimer]
+    [clearChatReplySequenceTimer, clearSpeechBubbleTimer]
+  );
+
+  const showChatReplyBubbles = useCallback(
+    (segments: string[], stateId: PetStateId) => {
+      const safeSegments = segments.length > 0 ? segments : ["卡咔听到了。"];
+      let segmentIndex = 0;
+
+      clearConversationRestoreTimer();
+      clearChatReplySequenceTimer();
+      clearSpeechBubbleTimer();
+      setPetState(stateId);
+
+      const playNextSegment = () => {
+        const segment = safeSegments[segmentIndex];
+        const durationMs = getChatBubbleDurationMs(segment, settingsRef.current.speechBubbleDurationMs);
+        setSpeechBubble({ visible: true, text: segment });
+        segmentIndex += 1;
+
+        chatReplySequenceTimerRef.current = window.setTimeout(() => {
+          if (segmentIndex < safeSegments.length) {
+            playNextSegment();
+            return;
+          }
+
+          setSpeechBubble(initialSpeechBubble);
+          if (petStateIdRef.current === stateId) {
+            setPetState("idle");
+          }
+          chatReplySequenceTimerRef.current = null;
+        }, durationMs);
+      };
+
+      playNextSegment();
+    },
+    [clearChatReplySequenceTimer, clearConversationRestoreTimer, clearSpeechBubbleTimer, setPetState]
   );
 
   const playPetReaction = useCallback(
@@ -694,20 +736,22 @@ export function App() {
 
       try {
         const replyText = await invoke<string>("send_desktop_chat_message", { text });
+        const replySegments = splitChatReplyIntoBubbles(replyText);
+        const replyState = getChatReplyState(replyText);
         setConversationInput("");
         setConversationPanelVisible(false);
-        setPetState("message");
-        showSpeechBubble(formatChatReplyForBubble(replyText), Math.max(settingsRef.current.speechBubbleDurationMs, 5200));
-
+        showChatReplyBubbles(replySegments, replyState);
+      } catch (error) {
+        const failureBubbleText = getChatFailureBubbleText(error);
+        clearConversationRestoreTimer();
+        setPetState("weakSignal");
+        showSpeechBubble(failureBubbleText, 3600);
         conversationRestoreTimerRef.current = window.setTimeout(() => {
-          if (petStateIdRef.current === "message") {
+          if (petStateIdRef.current === "weakSignal") {
             setPetState("idle");
           }
           conversationRestoreTimerRef.current = null;
-        }, Math.max(CONVERSATION_RESTORE_DELAY_MS, settingsRef.current.speechBubbleDurationMs));
-      } catch {
-        setPetState("weakSignal");
-        showSpeechBubble("信号有点弱，卡咔没接到核心回复。", 3600);
+        }, Math.max(CONVERSATION_RESTORE_DELAY_MS, 3600));
       } finally {
         setConversationPending(false);
       }
@@ -719,6 +763,7 @@ export function App() {
       conversationPending,
       registerActivity,
       setPetState,
+      showChatReplyBubbles,
       showSpeechBubble
     ]
   );
@@ -844,6 +889,7 @@ export function App() {
       clearIdleAmbientTimer();
       clearIdleAmbientRestoreTimer();
       idleAmbientStateRef.current = null;
+      clearChatReplySequenceTimer();
       clearConversationRestoreTimer();
       clearPetReactionTimer();
       clearTouchReactionTimer();
@@ -854,6 +900,7 @@ export function App() {
     clearIdleAmbientRestoreTimer,
     clearIdleAmbientTimer,
     clearIdleTimer,
+    clearChatReplySequenceTimer,
     clearConversationRestoreTimer,
     clearLongPressTimer,
     clearPetReactionTimer,
