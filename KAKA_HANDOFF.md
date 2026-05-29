@@ -151,7 +151,7 @@ web-console：npm run build passed
 2026-05-29 desktop-pet 互动行为增强第二阶段：`npm run build` passed；`cargo check` passed；`cargo test` passed；`git diff --check` passed（仅 CRLF 提示）；`npm run tauri:build` passed；release exe 已启动验证
 2026-05-29 用户实测：桌宠单击、双击、长按、连续摸头和长拖拽手感无问题
 2026-05-29 desktop-pet 托盘可靠性收尾：Windows UI Automation 可定位真实托盘图标；托盘图标左键显示/隐藏链路可触发；重启逻辑已做等价进程级验证；Windows 11 隐藏托盘右键菜单自动化点选不稳定，`修复窗口` / `重启桌宠` 仍建议用户手动最终确认
-2026-05-29 desktop-pet 轻量输入入口和最小核心对话接入：阶段二 `npm run build` passed；`cargo check` passed；阶段三 `npm run build` passed；`cargo check` passed；`cargo test` passed（3 passed）；最终 `npm run tauri:build` passed；release exe 已启动验证，当前 PID 1284；本机未连接到 `127.0.0.1:8001`，未主动请求 `/v1/chat`
+2026-05-29 desktop-pet 轻量输入入口和最小核心对话接入：阶段二 `npm run build` passed；`cargo check` passed；阶段三 `npm run build` passed；`cargo check` passed；`cargo test` passed（3 passed）；最终 `npm run tauri:build` passed；release exe 已启动验证，当前 PID 1284；自动验证阶段未主动请求 `/v1/chat`；用户随后启动 `kaka-core` 并手动测试桌宠对话链路，反馈无明显问题
 用户 2026-05-05 实测：当前真实链路暂无大问题
 真实数据库状态写入验证：通过
 浏览器管理台回放：通过
@@ -185,7 +185,7 @@ memory_candidates.id=42 -> approved -> rejected -> approved
 下一个对话框最应该继续做：
 
 ```text
-先阅读本交接文档和 docs/下次上下文.md；如果继续桌宠方向，优先阅读 `docs/桌宠开发说明.md`。当前桌宠已经完成轻量“说话”输入框和最小 `kaka-core /v1/chat` 接入，但本机当时未启动 `kaka-core`，没有主动请求真实 `/v1/chat` 以避免消耗模型调用；下一步建议用户先启动 `kaka-core`，再手动从桌宠右键“说话”测试真实回复链路。之后建议用户手动右键托盘最终确认一次 `修复窗口` 和 `重启桌宠`；方便重启电脑后再做开机自启真实重启回归测试。如果继续人设调试，优先阅读 `prompts/kaka_persona.md`、docs/卡咔人设设定.md、docs/卡咔场景反应样例.md、docs/卡咔负面情绪处理规则.md；当前运行 Prompt 已经过真实 LLM 小样本回放和真实 QQ 群聊回放，下一步继续小范围观察“甜但不腻、短但不冷、无动作、同群 bot 友好共存”是否稳定；如果继续功能验收，检查正式记忆倒序分页、新增、编辑、归档、恢复、硬删除、提示预演和对话复盘；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再观察自动候选分析、自动候选区复核、回复时长期记忆使用是否稳定
+先阅读本交接文档和 docs/下次上下文.md；如果继续桌宠方向，优先阅读 `docs/桌宠开发说明.md`。当前桌宠已经完成轻量“说话”输入框和最小 `kaka-core /v1/chat` 接入；用户已启动 `kaka-core` 并手动测试桌宠真实回复链路，反馈无明显问题。下一步建议继续观察气泡长度、发送中状态、失败重试和状态恢复是否自然。之后建议用户手动右键托盘最终确认一次 `修复窗口` 和 `重启桌宠`；方便重启电脑后再做开机自启真实重启回归测试。如果继续人设调试，优先阅读 `prompts/kaka_persona.md`、docs/卡咔人设设定.md、docs/卡咔场景反应样例.md、docs/卡咔负面情绪处理规则.md；当前运行 Prompt 已经过真实 LLM 小样本回放和真实 QQ 群聊回放，下一步继续小范围观察“甜但不腻、短但不冷、无动作、同群 bot 友好共存”是否稳定；如果继续功能验收，检查正式记忆倒序分页、新增、编辑、归档、恢复、硬删除、提示预演和对话复盘；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再观察自动候选分析、自动候选区复核、回复时长期记忆使用是否稳定
 ```
 
 第一目标仍然只做文本：
