@@ -15,12 +15,12 @@ import {
   getChatBubbleDurationMs,
   getChatFailureBubbleText,
   getChatReplyState,
+  normalizeChatReplyText,
   splitChatReplyIntoBubbles
 } from "./chatPresentation";
 import { PetCanvas } from "./PetCanvas";
 import {
   createPetBehaviorMemory,
-  getDoubleTouchReaction,
   getDragEndReaction,
   getIdleAmbientReaction,
   getLongDragReaction,
@@ -42,6 +42,13 @@ type ContextMenuState = {
 type SpeechBubbleState = {
   visible: boolean;
   text: string;
+};
+
+type ConversationHistoryItem = {
+  id: number;
+  role: "owner" | "kaka";
+  text: string;
+  failed?: boolean;
 };
 
 type StoredWindowPosition = {
@@ -76,6 +83,7 @@ const DOUBLE_TOUCH_WINDOW_MS = 260;
 const LONG_PRESS_DELAY_MS = 720;
 const LONG_DRAG_DELAY_MS = 4200;
 const MAX_CONVERSATION_INPUT_LENGTH = 80;
+const MAX_CONVERSATION_HISTORY_ITEMS = 6;
 const CONVERSATION_RESTORE_DELAY_MS = 1800;
 const IDLE_AMBIENT_DELAY_MS = {
   low: { min: 90 * 1000, max: 180 * 1000 },
@@ -127,12 +135,16 @@ export function App() {
   const [conversationPanelVisible, setConversationPanelVisible] = useState(false);
   const [conversationInput, setConversationInput] = useState("");
   const [conversationPending, setConversationPending] = useState(false);
+  const [conversationLastSendFailed, setConversationLastSendFailed] = useState(false);
+  const [conversationHistoryItems, setConversationHistoryItems] = useState<ConversationHistoryItem[]>([]);
   const petStateIdRef = useRef<PetStateId>("idle");
   const stateBeforeDragRef = useRef<PetStateId>("idle");
   const behaviorMemoryRef = useRef(createPetBehaviorMemory());
   const pointerSessionRef = useRef<PointerSession | null>(null);
   const conversationInputRef = useRef<HTMLInputElement | null>(null);
+  const conversationHistoryRef = useRef<HTMLDivElement | null>(null);
   const conversationActiveRef = useRef(false);
+  const nextConversationHistoryIdRef = useRef(1);
   const petReactionTimerRef = useRef<number | null>(null);
   const speechBubbleTimerRef = useRef<number | null>(null);
   const chatReplySequenceTimerRef = useRef<number | null>(null);
@@ -474,12 +486,49 @@ export function App() {
     }, DOUBLE_TOUCH_WINDOW_MS);
   }, [clearLongPressTimer, playPetReaction]);
 
+  const openConversationPanel = useCallback(() => {
+    registerActivity();
+    clearConversationRestoreTimer();
+    clearPetReactionTimer();
+    clearTouchReactionTimer();
+    clearLongPressTimer();
+    hideContextMenu();
+    setConversationLastSendFailed(false);
+    setConversationPanelVisible(true);
+    setPetState("message");
+    showSpeechBubble("要和卡咔说什么？", 2200);
+  }, [
+    clearConversationRestoreTimer,
+    clearLongPressTimer,
+    clearPetReactionTimer,
+    clearTouchReactionTimer,
+    hideContextMenu,
+    registerActivity,
+    setPetState,
+    showSpeechBubble
+  ]);
+
   const triggerDoubleTouchReaction = useCallback(() => {
     clearLongPressTimer();
     clearTouchReactionTimer();
     doubleTouchPointerIdRef.current = null;
-    playPetReaction(getDoubleTouchReaction(behaviorMemoryRef.current));
-  }, [clearLongPressTimer, clearTouchReactionTimer, playPetReaction]);
+    if (conversationPending) return;
+
+    if (conversationPanelVisible) {
+      conversationInputRef.current?.focus();
+      showSpeechBubble("卡咔在听。", 1500);
+      return;
+    }
+
+    openConversationPanel();
+  }, [
+    clearLongPressTimer,
+    clearTouchReactionTimer,
+    conversationPanelVisible,
+    conversationPending,
+    openConversationPanel,
+    showSpeechBubble
+  ]);
 
   const triggerLongPressReaction = useCallback(
     (pointerId: number) => {
@@ -683,37 +732,32 @@ export function App() {
     }
   }, [clearPetReactionTimer, hideContextMenu, registerActivity, setPetState, showSpeechBubble]);
 
-  const openConversationPanel = useCallback(() => {
-    registerActivity();
-    clearConversationRestoreTimer();
-    clearPetReactionTimer();
-    clearTouchReactionTimer();
-    clearLongPressTimer();
-    hideContextMenu();
-    setConversationPanelVisible(true);
-    setPetState("message");
-    showSpeechBubble("要和卡咔说什么？", 2200);
-  }, [
-    clearConversationRestoreTimer,
-    clearLongPressTimer,
-    clearPetReactionTimer,
-    clearTouchReactionTimer,
-    hideContextMenu,
-    registerActivity,
-    setPetState,
-    showSpeechBubble
-  ]);
-
   const closeConversationPanel = useCallback(() => {
     if (conversationPending) return;
     clearConversationRestoreTimer();
     setConversationPanelVisible(false);
     setConversationInput("");
+    setConversationLastSendFailed(false);
     hideSpeechBubble();
     if (petStateIdRef.current === "message") {
       setPetState("idle");
     }
   }, [clearConversationRestoreTimer, conversationPending, hideSpeechBubble, setPetState]);
+
+  const appendConversationHistoryItem = useCallback(
+    (item: Omit<ConversationHistoryItem, "id">) => {
+      const historyItem = {
+        ...item,
+        id: nextConversationHistoryIdRef.current
+      };
+      nextConversationHistoryIdRef.current += 1;
+
+      setConversationHistoryItems((currentItems) =>
+        [...currentItems, historyItem].slice(-MAX_CONVERSATION_HISTORY_ITEMS)
+      );
+    },
+    []
+  );
 
   const sendConversationMessage = useCallback(
     async (event?: React.FormEvent<HTMLFormElement>) => {
@@ -730,20 +774,29 @@ export function App() {
       registerActivity();
       clearConversationRestoreTimer();
       clearPetReactionTimer();
+      setConversationLastSendFailed(false);
       setConversationPending(true);
       setPetState("loading");
       showSpeechBubble("卡咔思考中...", 60 * 1000);
+      appendConversationHistoryItem({ role: "owner", text });
 
       try {
         const replyText = await invoke<string>("send_desktop_chat_message", { text });
         const replySegments = splitChatReplyIntoBubbles(replyText);
         const replyState = getChatReplyState(replyText);
+        appendConversationHistoryItem({
+          role: "kaka",
+          text: normalizeChatReplyText(replyText) || "卡咔听到了。"
+        });
         setConversationInput("");
+        setConversationLastSendFailed(false);
         setConversationPanelVisible(false);
         showChatReplyBubbles(replySegments, replyState);
       } catch (error) {
         const failureBubbleText = getChatFailureBubbleText(error);
         clearConversationRestoreTimer();
+        setConversationLastSendFailed(true);
+        appendConversationHistoryItem({ role: "kaka", text: failureBubbleText, failed: true });
         setPetState("weakSignal");
         showSpeechBubble(failureBubbleText, 3600);
         conversationRestoreTimerRef.current = window.setTimeout(() => {
@@ -757,6 +810,7 @@ export function App() {
       }
     },
     [
+      appendConversationHistoryItem,
       clearConversationRestoreTimer,
       clearPetReactionTimer,
       conversationInput,
@@ -766,6 +820,16 @@ export function App() {
       showChatReplyBubbles,
       showSpeechBubble
     ]
+  );
+
+  const updateConversationInput = useCallback(
+    (value: string) => {
+      setConversationInput(value);
+      if (conversationLastSendFailed) {
+        setConversationLastSendFailed(false);
+      }
+    },
+    [conversationLastSendFailed]
   );
 
   const resetWindowPosition = useCallback(async () => {
@@ -799,7 +863,7 @@ export function App() {
   }, [applyWindowSettings]);
 
   useEffect(() => {
-    if (!conversationPanelVisible) return undefined;
+    if (!conversationPanelVisible || conversationPending) return undefined;
 
     const focusTimer = window.setTimeout(() => {
       conversationInputRef.current?.focus();
@@ -808,7 +872,15 @@ export function App() {
     return () => {
       window.clearTimeout(focusTimer);
     };
-  }, [conversationPanelVisible]);
+  }, [conversationPanelVisible, conversationPending]);
+
+  useEffect(() => {
+    if (!conversationPanelVisible) return;
+    const historyElement = conversationHistoryRef.current;
+    if (!historyElement) return;
+
+    historyElement.scrollTop = historyElement.scrollHeight;
+  }, [conversationHistoryItems, conversationPanelVisible]);
 
   useEffect(() => {
     conversationActiveRef.current = conversationPanelVisible || conversationPending;
@@ -931,6 +1003,9 @@ export function App() {
     };
   }, [closeConversationPanel, conversationPanelVisible, hideContextMenu, registerActivity]);
 
+  const conversationCanSubmit = !conversationPending && conversationInput.trim().length > 0;
+  const conversationPrimaryButtonText = conversationPending ? "发送中" : conversationLastSendFailed ? "重试" : "发送";
+
   return (
     <main className="pet-shell" onContextMenu={showContextMenu}>
       {settings.showStateLabel && <div className="state-pill">{PET_STATES[petStateId].label}</div>}
@@ -942,7 +1017,7 @@ export function App() {
       <button
         type="button"
         className="drag-layer"
-        aria-label="拖拽卡咔"
+        aria-label="拖拽卡咔，双击说话"
         onPointerDown={beginPetPointer}
         onPointerMove={movePetPointer}
         onPointerUp={endPetPointer}
@@ -958,12 +1033,35 @@ export function App() {
           onKeyDown={(event) => {
             event.stopPropagation();
             registerActivity();
+            if (event.key === "Enter" && event.nativeEvent.isComposing) {
+              event.preventDefault();
+              return;
+            }
             if (event.key === "Escape") {
               event.preventDefault();
               closeConversationPanel();
             }
           }}
         >
+          {conversationHistoryItems.length > 0 && (
+            <div ref={conversationHistoryRef} className="conversation-history" aria-label="最近对话">
+              {conversationHistoryItems.map((item) => (
+                <div
+                  key={item.id}
+                  className={[
+                    "conversation-history-item",
+                    item.role === "owner" ? "owner" : "kaka",
+                    item.failed ? "failed" : ""
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
+                  <span className="conversation-history-role">{item.role === "owner" ? "你" : "卡咔"}</span>
+                  <span className="conversation-history-text">{item.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <input
             ref={conversationInputRef}
             className="conversation-input"
@@ -971,7 +1069,8 @@ export function App() {
             maxLength={MAX_CONVERSATION_INPUT_LENGTH}
             placeholder="对卡咔说一句话"
             disabled={conversationPending}
-            onChange={(event) => setConversationInput(event.target.value)}
+            autoComplete="off"
+            onChange={(event) => updateConversationInput(event.target.value)}
           />
           <div className="conversation-actions">
             <button
@@ -982,8 +1081,8 @@ export function App() {
             >
               取消
             </button>
-            <button type="submit" className="conversation-primary-button" disabled={conversationPending}>
-              {conversationPending ? "发送中" : "发送"}
+            <button type="submit" className="conversation-primary-button" disabled={!conversationCanSubmit}>
+              {conversationPrimaryButtonText}
             </button>
           </div>
         </form>
