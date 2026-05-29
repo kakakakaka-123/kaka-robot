@@ -62,13 +62,16 @@ type PointerSession = {
 };
 
 const CONTEXT_MENU_WIDTH = 164;
-const CONTEXT_MENU_HEIGHT = 151;
-const DEBUG_CONTEXT_MENU_HEIGHT = 322;
+const CONTEXT_MENU_HEIGHT = 181;
+const DEBUG_CONTEXT_MENU_HEIGHT = 352;
 const CONTEXT_MENU_MARGIN = 8;
 const POINTER_DRAG_THRESHOLD_PX = 6;
 const DOUBLE_TOUCH_WINDOW_MS = 260;
 const LONG_PRESS_DELAY_MS = 720;
 const LONG_DRAG_DELAY_MS = 4200;
+const MAX_CONVERSATION_INPUT_LENGTH = 80;
+const MAX_CHAT_REPLY_BUBBLE_LENGTH = 120;
+const CONVERSATION_RESTORE_DELAY_MS = 1800;
 const IDLE_AMBIENT_DELAY_MS = {
   low: { min: 90 * 1000, max: 180 * 1000 },
   normal: { min: 45 * 1000, max: 120 * 1000 },
@@ -111,19 +114,32 @@ function getRandomInt(min: number, max: number): number {
   return Math.floor(window.crypto.getRandomValues(new Uint32Array(1))[0] / (0xffffffff + 1) * (max - min + 1)) + min;
 }
 
+function formatChatReplyForBubble(text: string): string {
+  const normalizedText = text.replace(/\s+/g, " ").trim();
+  if (!normalizedText) return "卡咔听到了。";
+  if (normalizedText.length <= MAX_CHAT_REPLY_BUBBLE_LENGTH) return normalizedText;
+  return `${normalizedText.slice(0, MAX_CHAT_REPLY_BUBBLE_LENGTH)}...`;
+}
+
 export function App() {
   const [petStateId, setPetStateId] = useState<PetStateId>("idle");
   const [contextMenu, setContextMenu] = useState(initialContextMenu);
   const [speechBubble, setSpeechBubble] = useState(initialSpeechBubble);
   const [settings, setSettings] = useState(() => readDesktopPetSettings());
+  const [conversationPanelVisible, setConversationPanelVisible] = useState(false);
+  const [conversationInput, setConversationInput] = useState("");
+  const [conversationPending, setConversationPending] = useState(false);
   const petStateIdRef = useRef<PetStateId>("idle");
   const stateBeforeDragRef = useRef<PetStateId>("idle");
   const behaviorMemoryRef = useRef(createPetBehaviorMemory());
   const pointerSessionRef = useRef<PointerSession | null>(null);
+  const conversationInputRef = useRef<HTMLInputElement | null>(null);
+  const conversationActiveRef = useRef(false);
   const petReactionTimerRef = useRef<number | null>(null);
   const speechBubbleTimerRef = useRef<number | null>(null);
   const touchReactionTimerRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
+  const conversationRestoreTimerRef = useRef<number | null>(null);
   const doubleTouchPointerIdRef = useRef<number | null>(null);
   const idleTimerRef = useRef<number | null>(null);
   const idleAmbientTimerRef = useRef<number | null>(null);
@@ -158,6 +174,12 @@ export function App() {
     if (longPressTimerRef.current === null) return;
     window.clearTimeout(longPressTimerRef.current);
     longPressTimerRef.current = null;
+  }, []);
+
+  const clearConversationRestoreTimer = useCallback(() => {
+    if (conversationRestoreTimerRef.current === null) return;
+    window.clearTimeout(conversationRestoreTimerRef.current);
+    conversationRestoreTimerRef.current = null;
   }, []);
 
   const clearIdleTimer = useCallback(() => {
@@ -242,7 +264,13 @@ export function App() {
     idleAmbientTimerRef.current = window.setTimeout(() => {
       idleAmbientTimerRef.current = null;
 
-      if (petStateIdRef.current !== "idle" || contextMenu.visible || pointerSessionRef.current?.dragging) {
+      if (
+        petStateIdRef.current !== "idle" ||
+        contextMenu.visible ||
+        conversationPanelVisible ||
+        conversationPending ||
+        pointerSessionRef.current?.dragging
+      ) {
         scheduleIdleAmbient();
         return;
       }
@@ -269,6 +297,8 @@ export function App() {
   }, [
     clearIdleAmbientRestoreTimer,
     clearIdleAmbientTimer,
+    conversationPanelVisible,
+    conversationPending,
     contextMenu.visible,
     setPetState,
     showSpeechBubble
@@ -282,7 +312,7 @@ export function App() {
     idleTimerRef.current = window.setTimeout(() => {
       idleTimerRef.current = null;
       clearPetReactionTimer();
-      if (petStateIdRef.current !== "drag") {
+      if (!conversationActiveRef.current && petStateIdRef.current !== "drag") {
         const reaction = getSleepReaction(behaviorMemoryRef.current);
         if (!reaction) {
           return;
@@ -611,6 +641,88 @@ export function App() {
     }
   }, [clearPetReactionTimer, hideContextMenu, registerActivity, setPetState, showSpeechBubble]);
 
+  const openConversationPanel = useCallback(() => {
+    registerActivity();
+    clearConversationRestoreTimer();
+    clearPetReactionTimer();
+    clearTouchReactionTimer();
+    clearLongPressTimer();
+    hideContextMenu();
+    setConversationPanelVisible(true);
+    setPetState("message");
+    showSpeechBubble("要和卡咔说什么？", 2200);
+  }, [
+    clearConversationRestoreTimer,
+    clearLongPressTimer,
+    clearPetReactionTimer,
+    clearTouchReactionTimer,
+    hideContextMenu,
+    registerActivity,
+    setPetState,
+    showSpeechBubble
+  ]);
+
+  const closeConversationPanel = useCallback(() => {
+    if (conversationPending) return;
+    clearConversationRestoreTimer();
+    setConversationPanelVisible(false);
+    setConversationInput("");
+    hideSpeechBubble();
+    if (petStateIdRef.current === "message") {
+      setPetState("idle");
+    }
+  }, [clearConversationRestoreTimer, conversationPending, hideSpeechBubble, setPetState]);
+
+  const sendConversationMessage = useCallback(
+    async (event?: React.FormEvent<HTMLFormElement>) => {
+      event?.preventDefault();
+      if (conversationPending) return;
+
+      const text = conversationInput.trim();
+      if (!text) {
+        setConversationInput("");
+        showSpeechBubble("先输入一句话。", 1800);
+        return;
+      }
+
+      registerActivity();
+      clearConversationRestoreTimer();
+      clearPetReactionTimer();
+      setConversationPending(true);
+      setPetState("loading");
+      showSpeechBubble("卡咔思考中...", 60 * 1000);
+
+      try {
+        const replyText = await invoke<string>("send_desktop_chat_message", { text });
+        setConversationInput("");
+        setConversationPanelVisible(false);
+        setPetState("message");
+        showSpeechBubble(formatChatReplyForBubble(replyText), Math.max(settingsRef.current.speechBubbleDurationMs, 5200));
+
+        conversationRestoreTimerRef.current = window.setTimeout(() => {
+          if (petStateIdRef.current === "message") {
+            setPetState("idle");
+          }
+          conversationRestoreTimerRef.current = null;
+        }, Math.max(CONVERSATION_RESTORE_DELAY_MS, settingsRef.current.speechBubbleDurationMs));
+      } catch {
+        setPetState("weakSignal");
+        showSpeechBubble("信号有点弱，卡咔没接到核心回复。", 3600);
+      } finally {
+        setConversationPending(false);
+      }
+    },
+    [
+      clearConversationRestoreTimer,
+      clearPetReactionTimer,
+      conversationInput,
+      conversationPending,
+      registerActivity,
+      setPetState,
+      showSpeechBubble
+    ]
+  );
+
   const resetWindowPosition = useCallback(async () => {
     registerActivity();
     hideContextMenu();
@@ -640,6 +752,22 @@ export function App() {
     }
     applyWindowSettings(settingsRef.current);
   }, [applyWindowSettings]);
+
+  useEffect(() => {
+    if (!conversationPanelVisible) return undefined;
+
+    const focusTimer = window.setTimeout(() => {
+      conversationInputRef.current?.focus();
+    }, 30);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+    };
+  }, [conversationPanelVisible]);
+
+  useEffect(() => {
+    conversationActiveRef.current = conversationPanelVisible || conversationPending;
+  }, [conversationPanelVisible, conversationPending]);
 
   useEffect(() => {
     let disposed = false;
@@ -716,6 +844,7 @@ export function App() {
       clearIdleAmbientTimer();
       clearIdleAmbientRestoreTimer();
       idleAmbientStateRef.current = null;
+      clearConversationRestoreTimer();
       clearPetReactionTimer();
       clearTouchReactionTimer();
       clearLongPressTimer();
@@ -725,6 +854,7 @@ export function App() {
     clearIdleAmbientRestoreTimer,
     clearIdleAmbientTimer,
     clearIdleTimer,
+    clearConversationRestoreTimer,
     clearLongPressTimer,
     clearPetReactionTimer,
     clearSpeechBubbleTimer,
@@ -740,7 +870,10 @@ export function App() {
     };
     const onKeyDown = (event: KeyboardEvent) => {
       registerActivity();
-      if (event.key === "Escape") hideContextMenu();
+      if (event.key === "Escape") {
+        hideContextMenu();
+        if (conversationPanelVisible) closeConversationPanel();
+      }
     };
 
     window.addEventListener("pointerdown", onPointerDown);
@@ -749,7 +882,7 @@ export function App() {
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [hideContextMenu, registerActivity]);
+  }, [closeConversationPanel, conversationPanelVisible, hideContextMenu, registerActivity]);
 
   return (
     <main className="pet-shell" onContextMenu={showContextMenu}>
@@ -769,6 +902,45 @@ export function App() {
         onPointerCancel={cancelPetPointer}
       />
       <PetCanvas stateId={petStateId} />
+      {conversationPanelVisible && (
+        <form
+          className="conversation-panel"
+          onSubmit={sendConversationMessage}
+          onPointerDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            registerActivity();
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeConversationPanel();
+            }
+          }}
+        >
+          <input
+            ref={conversationInputRef}
+            className="conversation-input"
+            value={conversationInput}
+            maxLength={MAX_CONVERSATION_INPUT_LENGTH}
+            placeholder="对卡咔说一句话"
+            disabled={conversationPending}
+            onChange={(event) => setConversationInput(event.target.value)}
+          />
+          <div className="conversation-actions">
+            <button
+              type="button"
+              className="conversation-secondary-button"
+              disabled={conversationPending}
+              onClick={closeConversationPanel}
+            >
+              取消
+            </button>
+            <button type="submit" className="conversation-primary-button" disabled={conversationPending}>
+              {conversationPending ? "发送中" : "发送"}
+            </button>
+          </div>
+        </form>
+      )}
       {contextMenu.visible && (
         <div
           className="context-menu"
@@ -776,6 +948,15 @@ export function App() {
           onPointerDown={(event) => event.stopPropagation()}
         >
           <div className="menu-primary-actions">
+            <button
+              type="button"
+              className="menu-action-button chat-button"
+              onClick={() => {
+                openConversationPanel();
+              }}
+            >
+              说话
+            </button>
             <button
               type="button"
               className="menu-action-button pet-action-button"

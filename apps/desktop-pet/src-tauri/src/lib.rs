@@ -4,9 +4,10 @@ use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, EventTarget, LogicalSize, Manager, Size, WindowEvent};
@@ -26,6 +27,10 @@ const TRAY_EVENT_RESET_POSITION: &str = "kaka-tray-reset-position";
 const TRAY_EVENT_CHECK_CORE: &str = "kaka-tray-check-core";
 const FROM_AUTOSTART_ARG: &str = "--from-autostart";
 const STARTUP_SETTINGS_FILE_NAME: &str = "desktop-pet-startup.json";
+const KAKA_CORE_ADDR: &str = "127.0.0.1:8001";
+const KAKA_CORE_HOST_HEADER: &str = "127.0.0.1:8001";
+const CHAT_CONNECT_TIMEOUT_MS: u64 = 1500;
+const CHAT_IO_TIMEOUT_SECONDS: u64 = 70;
 
 #[derive(Default)]
 struct TrayState {
@@ -133,7 +138,7 @@ fn center_main_window(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn check_kaka_core_health() -> Result<(), String> {
     let mut stream = TcpStream::connect_timeout(
-        &"127.0.0.1:8001"
+        &KAKA_CORE_ADDR
             .parse()
             .map_err(|error| format!("invalid address: {error}"))?,
         Duration::from_millis(900),
@@ -161,6 +166,150 @@ fn check_kaka_core_health() -> Result<(), String> {
     } else {
         Err("unexpected health response".to_string())
     }
+}
+
+#[tauri::command]
+async fn send_desktop_chat_message(text: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || send_desktop_chat_message_blocking(text))
+        .await
+        .map_err(|error| format!("chat task failed: {error}"))?
+}
+
+fn send_desktop_chat_message_blocking(text: String) -> Result<String, String> {
+    let trimmed_text = text.trim();
+    if trimmed_text.is_empty() {
+        return Err("message text is empty".to_string());
+    }
+
+    let body = build_desktop_chat_request_body(trimmed_text);
+    let response = post_kaka_core_json(
+        "/v1/chat",
+        &body,
+        Duration::from_millis(CHAT_CONNECT_TIMEOUT_MS),
+        Duration::from_secs(CHAT_IO_TIMEOUT_SECONDS),
+    )?;
+    extract_chat_reply_text(&response)
+}
+
+fn build_desktop_chat_request_body(text: &str) -> String {
+    json!({
+        "event_id": build_desktop_event_id(),
+        "platform": "desktop",
+        "scene_type": "private",
+        "scene_id": "desktop-local",
+        "user_id": "desktop-owner",
+        "display_name": "主人",
+        "content": {
+            "type": "text",
+            "text": text
+        },
+        "raw_event": {
+            "source": "desktop_pet"
+        },
+        "metadata": {
+            "source": "desktop_pet",
+            "output_origin": "active",
+            "output_reason": "desktop_pet_input"
+        }
+    })
+    .to_string()
+}
+
+fn build_desktop_event_id() -> String {
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    format!("desktop-{timestamp_ms}")
+}
+
+fn post_kaka_core_json(
+    path: &str,
+    body: &str,
+    connect_timeout: Duration,
+    io_timeout: Duration,
+) -> Result<String, String> {
+    let mut stream = TcpStream::connect_timeout(
+        &KAKA_CORE_ADDR
+            .parse()
+            .map_err(|error| format!("invalid address: {error}"))?,
+        connect_timeout,
+    )
+    .map_err(|error| format!("connect failed: {error}"))?;
+
+    stream
+        .set_read_timeout(Some(io_timeout))
+        .map_err(|error| format!("set read timeout failed: {error}"))?;
+    stream
+        .set_write_timeout(Some(io_timeout))
+        .map_err(|error| format!("set write timeout failed: {error}"))?;
+
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {KAKA_CORE_HOST_HEADER}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| format!("request failed: {error}"))?;
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| format!("response failed: {error}"))?;
+
+    extract_http_body(&response).map(ToOwned::to_owned)
+}
+
+fn extract_http_body(response: &str) -> Result<&str, String> {
+    let (headers, body) = response
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "invalid HTTP response".to_string())?;
+    ensure_success_status(headers)?;
+    Ok(body)
+}
+
+fn ensure_success_status(headers: &str) -> Result<(), String> {
+    let status_line = headers.lines().next().unwrap_or("");
+    let status_code = status_line.split_whitespace().nth(1).unwrap_or("");
+    if status_code == "200" {
+        Ok(())
+    } else {
+        Err(format!("unexpected HTTP status: {status_line}"))
+    }
+}
+
+fn extract_chat_reply_text(body: &str) -> Result<String, String> {
+    let value: Value =
+        serde_json::from_str(body).map_err(|error| format!("invalid chat response JSON: {error}"))?;
+
+    if value.get("should_reply").and_then(Value::as_bool) == Some(false) {
+        return Ok("卡咔听到了，但这次先不说话。".to_string());
+    }
+
+    let actions = value
+        .get("actions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "chat response has no actions".to_string())?;
+
+    for action in actions {
+        if action.get("type").and_then(Value::as_str) != Some("send_text") {
+            continue;
+        }
+
+        let Some(text) = action
+            .get("content")
+            .and_then(|content| content.get("text"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+
+        return Ok(text.to_string());
+    }
+
+    Err("chat response has no text action".to_string())
 }
 
 fn exit_app(app: &tauri::AppHandle) {
@@ -421,6 +570,51 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_first_send_text_action() {
+        let body = r#"{
+            "event_id": "event-1",
+            "should_reply": true,
+            "actions": [
+                {
+                    "type": "send_text",
+                    "content": {
+                        "type": "text",
+                        "text": "我在。"
+                    }
+                }
+            ]
+        }"#;
+
+        assert_eq!(extract_chat_reply_text(body).unwrap(), "我在。");
+    }
+
+    #[test]
+    fn handles_no_reply_response() {
+        let body = r#"{
+            "event_id": "event-1",
+            "should_reply": false,
+            "actions": []
+        }"#;
+
+        assert_eq!(
+            extract_chat_reply_text(body).unwrap(),
+            "卡咔听到了，但这次先不说话。"
+        );
+    }
+
+    #[test]
+    fn rejects_non_success_http_status() {
+        let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 2\r\n\r\n{}";
+
+        assert!(extract_http_body(response).is_err());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -442,6 +636,7 @@ pub fn run() {
             get_main_window_visible,
             get_startup_settings,
             quit_app,
+            send_desktop_chat_message,
             set_autostart_enabled,
             set_main_window_always_on_top,
             set_main_window_size,

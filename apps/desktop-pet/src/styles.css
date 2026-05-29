@@ -192,6 +192,15 @@ button {
   color: #ffffff !important;
 }
 
+.chat-button {
+  grid-column: 1 / -1;
+  background: #2f7f86 !important;
+}
+
+.chat-button:hover {
+  background: #256b71 !important;
+}
+
 .pet-action-button {
   background: #cf4e89 !important;
 }
@@ -244,6 +253,85 @@ button {
   margin-top: 5px;
   padding-top: 4px;
   border-top: 1px solid rgba(255, 143, 196, 0.28);
+}
+
+.conversation-panel {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 5;
+  width: min(220px, calc(100vw - 20px));
+  padding: 8px;
+  border: 1px solid rgba(112, 119, 133, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 10px 28px rgba(40, 35, 44, 0.16);
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+}
+
+.conversation-input {
+  width: 100%;
+  height: 29px;
+  padding: 0 8px;
+  border: 1px solid #d8cfd7;
+  border-radius: 7px;
+  color: #302931;
+  background: #ffffff;
+  font-size: 13px;
+  line-height: 1.2;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.conversation-input:focus {
+  border-color: #c76094;
+  box-shadow: 0 0 0 2px rgba(215, 95, 149, 0.18);
+}
+
+.conversation-input:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.conversation-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.conversation-panel button {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.conversation-panel button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.conversation-secondary-button {
+  background: #7c7480;
+}
+
+.conversation-secondary-button:hover:not(:disabled) {
+  background: #675f6b;
+}
+
+.conversation-primary-button {
+  background: #cf4e89;
+}
+
+.conversation-primary-button:hover:not(:disabled) {
+  background: #b83f78;
 }
 
 .settings-shell {
