@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 
 import { PET_STATES, type PetStateId } from "./petStates";
 
-const PET_DISPLAY_HEIGHT = 220;
+const PET_DISPLAY_HEIGHT_RATIO = 220 / 280;
 const BASELINE_OFFSET = 8;
 
 type PetCanvasProps = {
@@ -64,7 +64,7 @@ export function PetCanvas({ stateId }: PetCanvasProps) {
 
       const pet = new Sprite(textures[stateIdRef.current]);
       pet.anchor.set(0.5, 1);
-      pet.height = PET_DISPLAY_HEIGHT;
+      updatePetDisplaySize(app, pet);
       pet.scale.x = pet.scale.y;
       pet.x = app.renderer.width / 2;
       pet.y = app.renderer.height - BASELINE_OFFSET;
@@ -75,6 +75,7 @@ export function PetCanvas({ stateId }: PetCanvasProps) {
         const elapsed = window.performance.now();
         const state = PET_STATES[stateIdRef.current];
         const motion = getMotionFrame(state.motion, elapsed);
+        updatePetDisplaySize(app, pet);
         pet.x = app.renderer.width / 2;
         pet.y = app.renderer.height - BASELINE_OFFSET + motion.y;
         pet.rotation = motion.rotation;
@@ -94,6 +95,12 @@ export function PetCanvas({ stateId }: PetCanvasProps) {
   }, []);
 
   return <div ref={hostRef} className="pet-stage" aria-hidden="true" />;
+}
+
+function updatePetDisplaySize(app: Application, pet: Sprite) {
+  const displayHeight = Math.min(app.renderer.height, app.renderer.width) * PET_DISPLAY_HEIGHT_RATIO;
+  pet.height = displayHeight;
+  pet.scale.x = pet.scale.y;
 }
 
 function getMotionFrame(

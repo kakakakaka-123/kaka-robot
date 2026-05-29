@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, EventTarget, Manager, WindowEvent};
+use tauri::{Emitter, EventTarget, LogicalSize, Manager, Size, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -74,6 +74,23 @@ fn set_main_window_visible(app: tauri::AppHandle, visible: bool) -> Result<bool,
     }
 
     get_main_window_visible(app)
+}
+
+#[tauri::command]
+fn set_main_window_always_on_top(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    app.get_webview_window(MAIN_WINDOW_LABEL)
+        .ok_or_else(|| "main window not found".to_string())?
+        .set_always_on_top(enabled)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_main_window_size(app: tauri::AppHandle, size: f64) -> Result<(), String> {
+    let clamped_size = size.clamp(220.0, 360.0);
+    app.get_webview_window(MAIN_WINDOW_LABEL)
+        .ok_or_else(|| "main window not found".to_string())?
+        .set_size(Size::Logical(LogicalSize::new(clamped_size, clamped_size)))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -426,6 +443,8 @@ pub fn run() {
             get_startup_settings,
             quit_app,
             set_autostart_enabled,
+            set_main_window_always_on_top,
+            set_main_window_size,
             set_main_window_visible,
             set_startup_settings,
             show_settings_window

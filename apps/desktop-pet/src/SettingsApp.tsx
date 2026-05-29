@@ -4,9 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   type DesktopPetSettings,
+  type IdleAmbientFrequency,
   type IdleSleepDelayMs,
+  type PetWindowSizePx,
   readDesktopPetSettings,
   SETTINGS_UPDATED_EVENT,
+  type SpeechBubbleDurationMs,
   TRAY_EVENT_RESET_POSITION,
   WINDOW_POSITION_STORAGE_KEY,
   writeDesktopPetSettings
@@ -32,6 +35,24 @@ const SLEEP_DELAY_OPTIONS: Array<{ label: string; value: IdleSleepDelayMs }> = [
   { label: "不自动睡觉", value: null }
 ];
 
+const PET_WINDOW_SIZE_OPTIONS: Array<{ label: string; value: PetWindowSizePx }> = [
+  { label: "小", value: 240 },
+  { label: "标准", value: 280 },
+  { label: "大", value: 320 }
+];
+
+const SPEECH_BUBBLE_DURATION_OPTIONS: Array<{ label: string; value: SpeechBubbleDurationMs }> = [
+  { label: "短", value: 1800 },
+  { label: "标准", value: 2600 },
+  { label: "长", value: 4000 }
+];
+
+const IDLE_AMBIENT_FREQUENCY_OPTIONS: Array<{ label: string; value: IdleAmbientFrequency }> = [
+  { label: "低", value: "low" },
+  { label: "标准", value: "normal" },
+  { label: "高", value: "high" }
+];
+
 function sleepDelayToInputValue(value: IdleSleepDelayMs): string {
   return value === null ? "off" : String(value);
 }
@@ -41,6 +62,24 @@ function inputValueToSleepDelay(value: string): IdleSleepDelayMs {
   if (value === "120000") return 120_000;
   if (value === "300000") return 300_000;
   return null;
+}
+
+function inputValueToPetWindowSize(value: string): PetWindowSizePx {
+  if (value === "240") return 240;
+  if (value === "320") return 320;
+  return 280;
+}
+
+function inputValueToSpeechBubbleDuration(value: string): SpeechBubbleDurationMs {
+  if (value === "1800") return 1800;
+  if (value === "4000") return 4000;
+  return 2600;
+}
+
+function inputValueToIdleAmbientFrequency(value: string): IdleAmbientFrequency {
+  if (value === "low") return "low";
+  if (value === "high") return "high";
+  return "normal";
 }
 
 export function SettingsApp() {
@@ -266,6 +305,36 @@ export function SettingsApp() {
         <label className="settings-toggle">
           <input
             type="checkbox"
+            checked={settings.alwaysOnTopEnabled}
+            disabled={pendingAction !== null}
+            onChange={(event) =>
+              void persistSettings({
+                ...settings,
+                alwaysOnTopEnabled: event.currentTarget.checked
+              })
+            }
+          />
+          <span>桌宠始终置顶</span>
+        </label>
+
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={settings.showStateLabel}
+            disabled={pendingAction !== null}
+            onChange={(event) =>
+              void persistSettings({
+                ...settings,
+                showStateLabel: event.currentTarget.checked
+              })
+            }
+          />
+          <span>显示顶部状态标签</span>
+        </label>
+
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
             checked={startupSettings.showPetOnAutostart}
             disabled={pendingAction !== null}
             onChange={() => void toggleShowPetOnAutostart()}
@@ -301,6 +370,66 @@ export function SettingsApp() {
             }
           />
           <span>启用右键调试状态菜单</span>
+        </label>
+
+        <label className="settings-field">
+          <span>桌宠大小</span>
+          <select
+            value={String(settings.petWindowSizePx)}
+            disabled={pendingAction !== null}
+            onChange={(event) =>
+              void persistSettings({
+                ...settings,
+                petWindowSizePx: inputValueToPetWindowSize(event.currentTarget.value)
+              })
+            }
+          >
+            {PET_WINDOW_SIZE_OPTIONS.map((option) => (
+              <option key={option.value} value={String(option.value)}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="settings-field">
+          <span>气泡停留时间</span>
+          <select
+            value={String(settings.speechBubbleDurationMs)}
+            disabled={pendingAction !== null}
+            onChange={(event) =>
+              void persistSettings({
+                ...settings,
+                speechBubbleDurationMs: inputValueToSpeechBubbleDuration(event.currentTarget.value)
+              })
+            }
+          >
+            {SPEECH_BUBBLE_DURATION_OPTIONS.map((option) => (
+              <option key={option.value} value={String(option.value)}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="settings-field">
+          <span>随机待机频率</span>
+          <select
+            value={settings.idleAmbientFrequency}
+            disabled={pendingAction !== null || !settings.idleAmbientEnabled}
+            onChange={(event) =>
+              void persistSettings({
+                ...settings,
+                idleAmbientFrequency: inputValueToIdleAmbientFrequency(event.currentTarget.value)
+              })
+            }
+          >
+            {IDLE_AMBIENT_FREQUENCY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="settings-field">

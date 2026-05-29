@@ -4,6 +4,7 @@ import { cursorPosition, getCurrentWindow, PhysicalPosition } from "@tauri-apps/
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  type DesktopPetSettings,
   readDesktopPetSettings,
   SETTINGS_UPDATED_EVENT,
   TRAY_EVENT_CHECK_CORE,
@@ -54,10 +55,12 @@ const CONTEXT_MENU_WIDTH = 164;
 const CONTEXT_MENU_HEIGHT = 151;
 const DEBUG_CONTEXT_MENU_HEIGHT = 322;
 const CONTEXT_MENU_MARGIN = 8;
-const SPEECH_BUBBLE_DURATION_MS = 2600;
 const POINTER_DRAG_THRESHOLD_PX = 6;
-const IDLE_AMBIENT_MIN_DELAY_MS = 45 * 1000;
-const IDLE_AMBIENT_MAX_DELAY_MS = 120 * 1000;
+const IDLE_AMBIENT_DELAY_MS = {
+  low: { min: 90 * 1000, max: 180 * 1000 },
+  normal: { min: 45 * 1000, max: 120 * 1000 },
+  high: { min: 20 * 1000, max: 55 * 1000 }
+} as const;
 
 const initialContextMenu: ContextMenuState = {
   visible: false,
@@ -203,7 +206,7 @@ export function App() {
   }, [clearSpeechBubbleTimer]);
 
   const showSpeechBubble = useCallback(
-    (text: string, durationMs = SPEECH_BUBBLE_DURATION_MS) => {
+    (text: string, durationMs = settingsRef.current.speechBubbleDurationMs) => {
       clearSpeechBubbleTimer();
       setSpeechBubble({ visible: true, text });
       speechBubbleTimerRef.current = window.setTimeout(() => {
@@ -213,6 +216,11 @@ export function App() {
     },
     [clearSpeechBubbleTimer]
   );
+
+  const applyWindowSettings = useCallback((nextSettings: DesktopPetSettings) => {
+    void invoke("set_main_window_size", { size: nextSettings.petWindowSizePx });
+    void invoke("set_main_window_always_on_top", { enabled: nextSettings.alwaysOnTopEnabled });
+  }, []);
 
   const cancelIdleAmbientAction = useCallback(() => {
     clearIdleAmbientRestoreTimer();
@@ -226,7 +234,8 @@ export function App() {
     clearIdleAmbientTimer();
     if (!settingsRef.current.idleAmbientEnabled) return;
 
-    const nextDelayMs = getRandomInt(IDLE_AMBIENT_MIN_DELAY_MS, IDLE_AMBIENT_MAX_DELAY_MS);
+    const delayRange = IDLE_AMBIENT_DELAY_MS[settingsRef.current.idleAmbientFrequency];
+    const nextDelayMs = getRandomInt(delayRange.min, delayRange.max);
 
     idleAmbientTimerRef.current = window.setTimeout(() => {
       idleAmbientTimerRef.current = null;
@@ -440,7 +449,7 @@ export function App() {
 
       if (pointerSession.dragging) {
         restoreStateAfterDrag();
-        showSpeechBubble(pickRandomItem(DRAG_END_BUBBLES), 1800);
+        showSpeechBubble(pickRandomItem(DRAG_END_BUBBLES));
         window.setTimeout(() => void saveWindowPosition(), 80);
       } else {
         triggerPetReaction();
@@ -559,7 +568,8 @@ export function App() {
     if (storedPosition) {
       void getCurrentWindow().setPosition(new PhysicalPosition(storedPosition.x, storedPosition.y));
     }
-  }, []);
+    applyWindowSettings(settingsRef.current);
+  }, [applyWindowSettings]);
 
   useEffect(() => {
     let disposed = false;
@@ -596,6 +606,7 @@ export function App() {
       const nextSettings = readDesktopPetSettings();
       settingsRef.current = nextSettings;
       setSettings(nextSettings);
+      applyWindowSettings(nextSettings);
       if (!settingsRef.current.idleAmbientEnabled) {
         cancelIdleAmbientAction();
         clearIdleAmbientTimer();
@@ -625,7 +636,7 @@ export function App() {
       window.removeEventListener("storage", applySettings);
       unlistenSettings?.();
     };
-  }, [cancelIdleAmbientAction, clearIdleAmbientTimer, resetIdleTimer, scheduleIdleAmbient]);
+  }, [applyWindowSettings, cancelIdleAmbientAction, clearIdleAmbientTimer, resetIdleTimer, scheduleIdleAmbient]);
 
   useEffect(() => {
     resetIdleTimer();
@@ -668,7 +679,7 @@ export function App() {
 
   return (
     <main className="pet-shell" onContextMenu={showContextMenu}>
-      <div className="state-pill">{PET_STATES[petStateId].label}</div>
+      {settings.showStateLabel && <div className="state-pill">{PET_STATES[petStateId].label}</div>}
       {speechBubble.visible && (
         <div className="speech-bubble" role="status" aria-live="polite">
           {speechBubble.text}
