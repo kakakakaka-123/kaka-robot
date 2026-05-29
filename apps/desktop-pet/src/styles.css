@@ -96,6 +96,7 @@ button {
   text-align: center;
   overflow-wrap: anywhere;
   pointer-events: none;
+  animation: speech-bubble-in 150ms ease-out;
 }
 
 .speech-bubble::after {
@@ -109,6 +110,18 @@ button {
   background: rgba(255, 248, 252, 0.9);
   content: "";
   transform: rotate(45deg);
+}
+
+@keyframes speech-bubble-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 .context-menu {

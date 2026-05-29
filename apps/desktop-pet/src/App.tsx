@@ -44,11 +44,16 @@ type PointerSession = {
   };
 };
 
+type PetTouchReaction = {
+  stateId: Extract<PetStateId, "pet" | "happy" | "thinking">;
+  text: string;
+  durationMs: number;
+};
+
 const CONTEXT_MENU_WIDTH = 164;
 const CONTEXT_MENU_HEIGHT = 151;
 const DEBUG_CONTEXT_MENU_HEIGHT = 322;
 const CONTEXT_MENU_MARGIN = 8;
-const PET_REACTION_DURATION_MS = 2000;
 const SPEECH_BUBBLE_DURATION_MS = 2600;
 const POINTER_DRAG_THRESHOLD_PX = 6;
 const IDLE_AMBIENT_MIN_DELAY_MS = 45 * 1000;
@@ -80,12 +85,24 @@ const PET_STATE_BUBBLE_TEXT: Partial<Record<PetStateId, string>> = {
 };
 
 const IDLE_AMBIENT_BUBBLES = [
-  "缓存有点热...",
-  "今天也在桌面巡逻。",
-  "别偷偷关闭卡咔。",
-  "核心信号待机中。",
-  "卡咔正在观察桌面。"
+  "我还在这里。",
+  "桌面风平浪静。",
+  "卡咔巡视中。",
+  "今天也要好好运行。",
+  "有事可以摸摸我。",
+  "我在旁边待机。"
 ] as const;
+
+const PET_TOUCH_REACTIONS: readonly PetTouchReaction[] = [
+  { stateId: "pet", text: "嘿嘿，再摸一下。", durationMs: 2100 },
+  { stateId: "happy", text: "收到摸头，心情加一格。", durationMs: 2400 },
+  { stateId: "pet", text: "尾巴要藏好。", durationMs: 2200 },
+  { stateId: "thinking", text: "摸头会提高缓存命中率吗...", durationMs: 2600 },
+  { stateId: "happy", text: "今天允许你多摸两下。", durationMs: 2400 }
+] as const;
+
+const WAKE_BUBBLES = ["唔...我醒啦。", "刚才睡得很轻。", "卡咔重新上线。"] as const;
+const DRAG_END_BUBBLES = ["放好啦。", "这个位置也不错。", "卡咔已停稳。"] as const;
 
 const IDLE_AMBIENT_ACTIONS: Array<{
   stateId: Extract<PetStateId, "happy" | "thinking" | "sleepy">;
@@ -270,7 +287,7 @@ export function App() {
     resetIdleTimer();
     if (wasSleeping) {
       setPetState("idle");
-      showSpeechBubble("唔...我醒啦。");
+      showSpeechBubble(pickRandomItem(WAKE_BUBBLES));
     }
   }, [cancelIdleAmbientAction, resetIdleTimer, setPetState, showSpeechBubble]);
 
@@ -360,14 +377,15 @@ export function App() {
     hideContextMenu();
     registerActivity();
     clearPetReactionTimer();
-    setPetState("pet");
-    showSpeechBubble(PET_STATE_BUBBLE_TEXT.pet ?? "嘿嘿。");
+    const reaction = pickRandomItem(PET_TOUCH_REACTIONS);
+    setPetState(reaction.stateId);
+    showSpeechBubble(reaction.text);
     petReactionTimerRef.current = window.setTimeout(() => {
-      if (petStateIdRef.current === "pet") {
+      if (petStateIdRef.current === reaction.stateId) {
         setPetState("idle");
       }
       petReactionTimerRef.current = null;
-    }, PET_REACTION_DURATION_MS);
+    }, reaction.durationMs);
   }, [clearPetReactionTimer, hideContextMenu, registerActivity, setPetState, showSpeechBubble]);
 
   const beginPetPointer = useCallback(
@@ -422,12 +440,13 @@ export function App() {
 
       if (pointerSession.dragging) {
         restoreStateAfterDrag();
+        showSpeechBubble(pickRandomItem(DRAG_END_BUBBLES), 1800);
         window.setTimeout(() => void saveWindowPosition(), 80);
       } else {
         triggerPetReaction();
       }
     },
-    [restoreStateAfterDrag, saveWindowPosition, triggerPetReaction]
+    [restoreStateAfterDrag, saveWindowPosition, showSpeechBubble, triggerPetReaction]
   );
 
   const cancelPetPointer = useCallback(

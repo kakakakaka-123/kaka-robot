@@ -2,6 +2,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -17,7 +18,9 @@ const TRAY_MENU_SHOW_HIDE: &str = "tray-show-hide";
 const TRAY_MENU_SETTINGS: &str = "tray-settings";
 const TRAY_MENU_AUTOSTART: &str = "tray-autostart";
 const TRAY_MENU_RESET_POSITION: &str = "tray-reset-position";
+const TRAY_MENU_REPAIR_WINDOWS: &str = "tray-repair-windows";
 const TRAY_MENU_CHECK_CORE: &str = "tray-check-core";
+const TRAY_MENU_RESTART_APP: &str = "tray-restart-app";
 const TRAY_MENU_QUIT: &str = "tray-quit";
 const TRAY_EVENT_RESET_POSITION: &str = "kaka-tray-reset-position";
 const TRAY_EVENT_CHECK_CORE: &str = "kaka-tray-check-core";
@@ -147,6 +150,15 @@ fn exit_app(app: &tauri::AppHandle) {
     app.exit(0);
 }
 
+fn restart_app(app: &tauri::AppHandle) -> Result<(), String> {
+    let exe_path = std::env::current_exe().map_err(|error| error.to_string())?;
+    Command::new(exe_path)
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    app.exit(0);
+    Ok(())
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.show();
@@ -235,6 +247,20 @@ fn open_settings_window(app: &tauri::AppHandle) -> Result<(), String> {
     Err("settings window not found".to_string())
 }
 
+fn repair_windows(app: &tauri::AppHandle) {
+    if let Some(settings_window) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        let _ = settings_window.hide();
+        let _ = settings_window.center();
+    }
+
+    if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = main_window.center();
+        let _ = main_window.show();
+        let _ = main_window.set_focus();
+        sync_main_window_menu(app, true);
+    }
+}
+
 fn emit_tray_event(app: &tauri::AppHandle, event_name: &str) {
     show_main_window(app);
     let _ = app.emit_to(
@@ -310,7 +336,10 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
         .build(app)?;
     let reset_position =
         MenuItemBuilder::with_id(TRAY_MENU_RESET_POSITION, "重置位置").build(app)?;
+    let repair_windows_item =
+        MenuItemBuilder::with_id(TRAY_MENU_REPAIR_WINDOWS, "修复窗口").build(app)?;
     let check_core = MenuItemBuilder::with_id(TRAY_MENU_CHECK_CORE, "连接测试").build(app)?;
+    let restart_app_item = MenuItemBuilder::with_id(TRAY_MENU_RESTART_APP, "重启桌宠").build(app)?;
     let quit = MenuItemBuilder::with_id(TRAY_MENU_QUIT, "退出").build(app)?;
 
     let menu = MenuBuilder::new(app)
@@ -319,8 +348,10 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
         .item(&autostart)
         .separator()
         .item(&reset_position)
+        .item(&repair_windows_item)
         .item(&check_core)
         .separator()
+        .item(&restart_app_item)
         .item(&quit)
         .build()?;
 
@@ -360,7 +391,11 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
             }
             TRAY_MENU_AUTOSTART => toggle_autostart(app),
             TRAY_MENU_RESET_POSITION => emit_tray_event(app, TRAY_EVENT_RESET_POSITION),
+            TRAY_MENU_REPAIR_WINDOWS => repair_windows(app),
             TRAY_MENU_CHECK_CORE => emit_tray_event(app, TRAY_EVENT_CHECK_CORE),
+            TRAY_MENU_RESTART_APP => {
+                let _ = restart_app(app);
+            }
             TRAY_MENU_QUIT => exit_app(app),
             _ => {}
         })
