@@ -64,6 +64,7 @@ D:\Python\AgentRobot\kaka-v2
 -> 桌宠生命感增强第一阶段
 -> 桌宠生命感增强第二阶段
 -> 桌宠设置窗口连接测试同步
+-> 桌宠对话回复气泡播放修复
 ```
 
 当前真实状态：
@@ -103,6 +104,7 @@ D:\Python\AgentRobot\kaka-v2
 - 桌宠生命感增强第一阶段已完成：只改 `apps/desktop-pet/src/PetCanvas.tsx`，没有新增素材、没有新建数据库表、没有修改 `kaka-core` 协议。PixiJS 单贴图动作已从统一轻量动作升级为状态差异动作，待机有轻微呼吸/浮动/摆动，开心、收到消息、思考、信号弱、炸毛、睡觉和拖拽各有不同节奏，状态贴图切换时有轻量弹入和淡入缓动。
 - 桌宠生命感增强第二阶段已完成：只改 `apps/desktop-pet/src/App.tsx`，没有新增素材、没有新建数据库表、没有修改 `kaka-core` 协议。桌宠状态现在带来源优先级，拖拽、对话、系统检查、回复播放、普通互动、睡觉和随机待机会分层处理；旧 timer 恢复状态时会校验来源，避免把当前高优先级状态切回待机。对话回复成功后先短暂进入 `收到消息`，再按内容进入 `思考`、`开心` 或继续 `收到消息`，播放结束后轻停一下再回待机。
 - 设置窗口连接测试已同步桌宠本体状态：设置面板点击 `连接测试` 时会发出 `kaka-tray-check-core` 事件给主窗口，复用托盘连接测试同一套桌宠反馈；没有新增素材、没有改数据库、没有改 `kaka-core` 协议。
+- 桌宠对话回复气泡播放已修复：最近对话能看到回复但本体没有气泡的问题来自待机 effect 重跑时误清理回复气泡播放 timer；现在待机 timer 清理和窗口卸载清理已拆开，关闭输入面板不会再取消刚排队的回复气泡。没有新增素材、没有改数据库、没有改 `kaka-core` 协议；用户已实测剩余项无问题。
 - Web 管理台已成为正式记忆的日常查看和管理入口；脚本现在主要留给开发、测试、批量修复、候选/输入后台处理和应急排查。
 - 近期已补上跨进程事件处理锁和 SQLite 时间戳修正，重复聊天事件在绕过进程内锁时也不会重复调用 LLM；管理总览继续脱敏 `database_url`。
 - 输入分析和候选区的写库能力仍保留在管理 API、脚本和数据库层；Web 日常页面暂不暴露这些后台处理入口。
@@ -167,6 +169,7 @@ web-console：npm run build passed
 2026-05-30 desktop-pet 生命感增强第一阶段：`npm run build` passed；`cargo check` passed；`cargo test` passed（3 passed）；`git diff --check` passed（仅 CRLF 提示）；`npm run tauri:build` passed；release exe 已启动验证，当前 PID 29260
 2026-05-30 desktop-pet 生命感增强第二阶段：阶段一/二均已分别 `npm run build` passed；最终 `npm run build` passed；`cargo check` passed；`cargo test` passed（3 passed）；`git diff --check` passed（仅 CRLF 提示）；`npm run tauri:build` passed；release exe 已启动验证，当前 PID 35452
 2026-05-30 desktop-pet 设置窗口连接测试同步：`npm run build` passed；`cargo check` passed；`cargo test` passed（3 passed）；`git diff --check` passed（仅 CRLF 提示）；`npm run tauri:build` passed；release exe 已启动验证，当前 PID 40688
+2026-05-30 desktop-pet 对话回复气泡播放修复：`npm run build` passed；`cargo check` passed；`cargo test` passed（3 passed）；`git diff --check` passed（仅 CRLF 提示）；首次 `npm run tauri:build` 因旧 release 进程占用 exe 失败，停止旧进程后重跑 passed；release exe 已启动验证，当前 PID 29608；用户实测剩余项无问题
 用户 2026-05-05 实测：当前真实链路暂无大问题
 真实数据库状态写入验证：通过
 浏览器管理台回放：通过

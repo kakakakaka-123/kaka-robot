@@ -1090,6 +1090,21 @@ export function App() {
       clearIdleAmbientTimer();
       clearIdleAmbientRestoreTimer();
       idleAmbientStateRef.current = null;
+    };
+  }, [
+    clearIdleAmbientRestoreTimer,
+    clearIdleAmbientTimer,
+    clearIdleTimer,
+    resetIdleTimer,
+    scheduleIdleAmbient
+  ]);
+
+  useEffect(() => {
+    return () => {
+      clearIdleTimer();
+      clearIdleAmbientTimer();
+      clearIdleAmbientRestoreTimer();
+      idleAmbientStateRef.current = null;
       clearChatReplySequenceTimer();
       clearConversationRestoreTimer();
       clearSystemStateRestoreTimer();
@@ -1099,18 +1114,16 @@ export function App() {
       clearSpeechBubbleTimer();
     };
   }, [
+    clearChatReplySequenceTimer,
+    clearConversationRestoreTimer,
     clearIdleAmbientRestoreTimer,
     clearIdleAmbientTimer,
     clearIdleTimer,
-    clearChatReplySequenceTimer,
-    clearConversationRestoreTimer,
-    clearSystemStateRestoreTimer,
     clearLongPressTimer,
     clearPetReactionTimer,
     clearSpeechBubbleTimer,
-    clearTouchReactionTimer,
-    resetIdleTimer,
-    scheduleIdleAmbient
+    clearSystemStateRestoreTimer,
+    clearTouchReactionTimer
   ]);
 
   useEffect(() => {
