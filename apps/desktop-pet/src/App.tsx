@@ -51,6 +51,11 @@ type ConversationHistoryItem = {
   failed?: boolean;
 };
 
+type ConversationPanelNotice = {
+  text: string;
+  tone: "neutral" | "warning" | "error";
+};
+
 type StoredWindowPosition = {
   x: number;
   y: number;
@@ -136,7 +141,9 @@ export function App() {
   const [conversationInput, setConversationInput] = useState("");
   const [conversationPending, setConversationPending] = useState(false);
   const [conversationLastSendFailed, setConversationLastSendFailed] = useState(false);
+  const [conversationPanelNotice, setConversationPanelNotice] = useState<ConversationPanelNotice | null>(null);
   const [conversationHistoryItems, setConversationHistoryItems] = useState<ConversationHistoryItem[]>([]);
+  const [conversationHistoryExpanded, setConversationHistoryExpanded] = useState(false);
   const petStateIdRef = useRef<PetStateId>("idle");
   const stateBeforeDragRef = useRef<PetStateId>("idle");
   const behaviorMemoryRef = useRef(createPetBehaviorMemory());
@@ -493,19 +500,20 @@ export function App() {
     clearTouchReactionTimer();
     clearLongPressTimer();
     hideContextMenu();
+    hideSpeechBubble();
     setConversationLastSendFailed(false);
+    setConversationPanelNotice({ text: "要和卡咔说什么？", tone: "neutral" });
     setConversationPanelVisible(true);
     setPetState("message");
-    showSpeechBubble("要和卡咔说什么？", 2200);
   }, [
     clearConversationRestoreTimer,
     clearLongPressTimer,
     clearPetReactionTimer,
     clearTouchReactionTimer,
     hideContextMenu,
+    hideSpeechBubble,
     registerActivity,
-    setPetState,
-    showSpeechBubble
+    setPetState
   ]);
 
   const triggerDoubleTouchReaction = useCallback(() => {
@@ -516,7 +524,7 @@ export function App() {
 
     if (conversationPanelVisible) {
       conversationInputRef.current?.focus();
-      showSpeechBubble("卡咔在听。", 1500);
+      setConversationPanelNotice({ text: "卡咔在听。", tone: "neutral" });
       return;
     }
 
@@ -526,8 +534,7 @@ export function App() {
     clearTouchReactionTimer,
     conversationPanelVisible,
     conversationPending,
-    openConversationPanel,
-    showSpeechBubble
+    openConversationPanel
   ]);
 
   const triggerLongPressReaction = useCallback(
@@ -738,6 +745,7 @@ export function App() {
     setConversationPanelVisible(false);
     setConversationInput("");
     setConversationLastSendFailed(false);
+    setConversationPanelNotice(null);
     hideSpeechBubble();
     if (petStateIdRef.current === "message") {
       setPetState("idle");
@@ -767,7 +775,8 @@ export function App() {
       const text = conversationInput.trim();
       if (!text) {
         setConversationInput("");
-        showSpeechBubble("先输入一句话。", 1800);
+        setConversationPanelNotice({ text: "先输入一句话。", tone: "warning" });
+        conversationInputRef.current?.focus();
         return;
       }
 
@@ -775,9 +784,9 @@ export function App() {
       clearConversationRestoreTimer();
       clearPetReactionTimer();
       setConversationLastSendFailed(false);
+      setConversationPanelNotice({ text: "卡咔思考中...", tone: "neutral" });
       setConversationPending(true);
       setPetState("loading");
-      showSpeechBubble("卡咔思考中...", 60 * 1000);
       appendConversationHistoryItem({ role: "owner", text });
 
       try {
@@ -790,15 +799,16 @@ export function App() {
         });
         setConversationInput("");
         setConversationLastSendFailed(false);
+        setConversationPanelNotice(null);
         setConversationPanelVisible(false);
         showChatReplyBubbles(replySegments, replyState);
       } catch (error) {
         const failureBubbleText = getChatFailureBubbleText(error);
         clearConversationRestoreTimer();
         setConversationLastSendFailed(true);
+        setConversationPanelNotice({ text: failureBubbleText, tone: "error" });
         appendConversationHistoryItem({ role: "kaka", text: failureBubbleText, failed: true });
         setPetState("weakSignal");
-        showSpeechBubble(failureBubbleText, 3600);
         conversationRestoreTimerRef.current = window.setTimeout(() => {
           if (petStateIdRef.current === "weakSignal") {
             setPetState("idle");
@@ -817,19 +827,21 @@ export function App() {
       conversationPending,
       registerActivity,
       setPetState,
-      showChatReplyBubbles,
-      showSpeechBubble
+      showChatReplyBubbles
     ]
   );
 
   const updateConversationInput = useCallback(
     (value: string) => {
       setConversationInput(value);
+      if (conversationPanelNotice) {
+        setConversationPanelNotice(null);
+      }
       if (conversationLastSendFailed) {
         setConversationLastSendFailed(false);
       }
     },
-    [conversationLastSendFailed]
+    [conversationLastSendFailed, conversationPanelNotice]
   );
 
   const resetWindowPosition = useCallback(async () => {
@@ -875,12 +887,12 @@ export function App() {
   }, [conversationPanelVisible, conversationPending]);
 
   useEffect(() => {
-    if (!conversationPanelVisible) return;
+    if (!conversationPanelVisible || !conversationHistoryExpanded) return;
     const historyElement = conversationHistoryRef.current;
     if (!historyElement) return;
 
     historyElement.scrollTop = historyElement.scrollHeight;
-  }, [conversationHistoryItems, conversationPanelVisible]);
+  }, [conversationHistoryExpanded, conversationHistoryItems, conversationPanelVisible]);
 
   useEffect(() => {
     conversationActiveRef.current = conversationPanelVisible || conversationPending;
@@ -1005,6 +1017,7 @@ export function App() {
 
   const conversationCanSubmit = !conversationPending && conversationInput.trim().length > 0;
   const conversationPrimaryButtonText = conversationPending ? "发送中" : conversationLastSendFailed ? "重试" : "发送";
+  const conversationHistoryToggleText = conversationHistoryExpanded ? "收起" : "展开";
 
   return (
     <main className="pet-shell" onContextMenu={showContextMenu}>
@@ -1043,23 +1056,42 @@ export function App() {
             }
           }}
         >
+          {conversationPanelNotice && (
+            <div className={`conversation-notice ${conversationPanelNotice.tone}`}>
+              {conversationPanelNotice.text}
+            </div>
+          )}
           {conversationHistoryItems.length > 0 && (
-            <div ref={conversationHistoryRef} className="conversation-history" aria-label="最近对话">
-              {conversationHistoryItems.map((item) => (
-                <div
-                  key={item.id}
-                  className={[
-                    "conversation-history-item",
-                    item.role === "owner" ? "owner" : "kaka",
-                    item.failed ? "failed" : ""
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                >
-                  <span className="conversation-history-role">{item.role === "owner" ? "你" : "卡咔"}</span>
-                  <span className="conversation-history-text">{item.text}</span>
+            <div className="conversation-history-shell">
+              <button
+                type="button"
+                className="conversation-history-toggle"
+                aria-expanded={conversationHistoryExpanded}
+                onClick={() => setConversationHistoryExpanded((expanded) => !expanded)}
+              >
+                <span>最近对话</span>
+                <span>{conversationHistoryItems.length} 条</span>
+                <span>{conversationHistoryToggleText}</span>
+              </button>
+              {conversationHistoryExpanded && (
+                <div ref={conversationHistoryRef} className="conversation-history" aria-label="最近对话">
+                  {conversationHistoryItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className={[
+                        "conversation-history-item",
+                        item.role === "owner" ? "owner" : "kaka",
+                        item.failed ? "failed" : ""
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                    >
+                      <span className="conversation-history-role">{item.role === "owner" ? "你" : "卡咔"}</span>
+                      <span className="conversation-history-text">{item.text}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
           <input

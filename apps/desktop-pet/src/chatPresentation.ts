@@ -2,6 +2,8 @@ import type { PetStateId } from "./petStates";
 
 const MAX_REPLY_SEGMENT_LENGTH = 58;
 const MAX_REPLY_CONTENT_SEGMENTS = 3;
+const SHORT_NEUTRAL_REPLY_MAX_LENGTH = 18;
+const LONG_THINKING_REPLY_MIN_LENGTH = 96;
 const CHAT_REPLY_TRUNCATED_NOTICE = "后面还有一点，卡咔先说这些。";
 
 const THINKING_KEYWORDS = [
@@ -23,7 +25,6 @@ const THINKING_KEYWORDS = [
 
 const HAPPY_KEYWORDS = [
   "好呀",
-  "可以",
   "没问题",
   "太好了",
   "开心",
@@ -37,6 +38,8 @@ const HAPPY_KEYWORDS = [
   "搞定"
 ];
 
+const LIGHT_AFFIRMATIVE_KEYWORDS = ["可以", "好", "嗯嗯", "行呀", "收到"];
+
 export function normalizeChatReplyText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -44,6 +47,10 @@ export function normalizeChatReplyText(text: string): string {
 export function getChatReplyState(replyText: string): PetStateId {
   const normalizedText = normalizeChatReplyText(replyText);
   if (!normalizedText) return "message";
+
+  if (normalizedText.length >= LONG_THINKING_REPLY_MIN_LENGTH) {
+    return "thinking";
+  }
 
   if (THINKING_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
     return "thinking";
@@ -53,8 +60,12 @@ export function getChatReplyState(replyText: string): PetStateId {
     return "happy";
   }
 
-  if (normalizedText.length > 80) {
-    return "thinking";
+  if (normalizedText.length <= SHORT_NEUTRAL_REPLY_MAX_LENGTH) {
+    return "message";
+  }
+
+  if (LIGHT_AFFIRMATIVE_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
+    return "happy";
   }
 
   return "message";
