@@ -56,6 +56,22 @@ type ConversationPanelNotice = {
   tone: "neutral" | "warning" | "error";
 };
 
+type PetStateSource =
+  | "idle"
+  | "ambient"
+  | "sleep"
+  | "manual"
+  | "reaction"
+  | "chatReply"
+  | "system"
+  | "conversation"
+  | "drag";
+
+type PetStateOptions = {
+  force?: boolean;
+  release?: boolean;
+};
+
 type StoredWindowPosition = {
   x: number;
   y: number;
@@ -90,11 +106,26 @@ const LONG_DRAG_DELAY_MS = 4200;
 const MAX_CONVERSATION_INPUT_LENGTH = 80;
 const MAX_CONVERSATION_HISTORY_ITEMS = 6;
 const CONVERSATION_RESTORE_DELAY_MS = 1800;
+const CHAT_REPLY_ACK_DELAY_MS = 360;
+const CHAT_REPLY_SETTLE_MS = 900;
+const SYSTEM_STATE_RESTORE_DELAY_MS = 3200;
 const IDLE_AMBIENT_DELAY_MS = {
   low: { min: 90 * 1000, max: 180 * 1000 },
   normal: { min: 45 * 1000, max: 120 * 1000 },
   high: { min: 20 * 1000, max: 55 * 1000 }
 } as const;
+
+const PET_STATE_SOURCE_PRIORITY: Record<PetStateSource, number> = {
+  idle: 0,
+  ambient: 1,
+  sleep: 2,
+  manual: 2,
+  reaction: 3,
+  chatReply: 4,
+  system: 5,
+  conversation: 6,
+  drag: 7
+};
 
 const initialContextMenu: ContextMenuState = {
   visible: false,
@@ -132,6 +163,11 @@ function getRandomInt(min: number, max: number): number {
   return Math.floor(window.crypto.getRandomValues(new Uint32Array(1))[0] / (0xffffffff + 1) * (max - min + 1)) + min;
 }
 
+function getStableStateAfterDrag(stateId: PetStateId, source: PetStateSource): PetStateId {
+  if (source === "manual" && stateId !== "drag") return stateId;
+  return "idle";
+}
+
 export function App() {
   const [petStateId, setPetStateId] = useState<PetStateId>("idle");
   const [contextMenu, setContextMenu] = useState(initialContextMenu);
@@ -145,7 +181,9 @@ export function App() {
   const [conversationHistoryItems, setConversationHistoryItems] = useState<ConversationHistoryItem[]>([]);
   const [conversationHistoryExpanded, setConversationHistoryExpanded] = useState(false);
   const petStateIdRef = useRef<PetStateId>("idle");
+  const petStateSourceRef = useRef<PetStateSource>("idle");
   const stateBeforeDragRef = useRef<PetStateId>("idle");
+  const stateSourceBeforeDragRef = useRef<PetStateSource>("idle");
   const behaviorMemoryRef = useRef(createPetBehaviorMemory());
   const pointerSessionRef = useRef<PointerSession | null>(null);
   const conversationInputRef = useRef<HTMLInputElement | null>(null);
@@ -158,6 +196,7 @@ export function App() {
   const touchReactionTimerRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const conversationRestoreTimerRef = useRef<number | null>(null);
+  const systemStateRestoreTimerRef = useRef<number | null>(null);
   const doubleTouchPointerIdRef = useRef<number | null>(null);
   const idleTimerRef = useRef<number | null>(null);
   const idleAmbientTimerRef = useRef<number | null>(null);
@@ -165,9 +204,21 @@ export function App() {
   const idleAmbientStateRef = useRef<PetStateId | null>(null);
   const settingsRef = useRef(settings);
 
-  const setPetState = useCallback((nextStateId: PetStateId) => {
+  const setPetState = useCallback((nextStateId: PetStateId, source: PetStateSource = "system", options: PetStateOptions = {}) => {
+    const currentSource = petStateSourceRef.current;
+    const canApply =
+      options.force ||
+      source === currentSource ||
+      (options.release
+        ? source === currentSource
+        : PET_STATE_SOURCE_PRIORITY[source] >= PET_STATE_SOURCE_PRIORITY[currentSource]);
+
+    if (!canApply) return false;
+
     petStateIdRef.current = nextStateId;
+    petStateSourceRef.current = nextStateId === "idle" ? "idle" : source;
     setPetStateId(nextStateId);
+    return true;
   }, []);
 
   const clearPetReactionTimer = useCallback(() => {
@@ -204,6 +255,12 @@ export function App() {
     if (conversationRestoreTimerRef.current === null) return;
     window.clearTimeout(conversationRestoreTimerRef.current);
     conversationRestoreTimerRef.current = null;
+  }, []);
+
+  const clearSystemStateRestoreTimer = useCallback(() => {
+    if (systemStateRestoreTimerRef.current === null) return;
+    window.clearTimeout(systemStateRestoreTimerRef.current);
+    systemStateRestoreTimerRef.current = null;
   }, []);
 
   const clearIdleTimer = useCallback(() => {
@@ -255,9 +312,12 @@ export function App() {
       clearConversationRestoreTimer();
       clearChatReplySequenceTimer();
       clearSpeechBubbleTimer();
-      setPetState(stateId);
+      setPetState("message", "chatReply", { force: true });
 
       const playNextSegment = () => {
+        if (segmentIndex === 0 && stateId !== "message") {
+          setPetState(stateId, "chatReply", { force: true });
+        }
         const segment = safeSegments[segmentIndex];
         const durationMs = getChatBubbleDurationMs(segment, settingsRef.current.speechBubbleDurationMs);
         setSpeechBubble({ visible: true, text: segment });
@@ -270,14 +330,18 @@ export function App() {
           }
 
           setSpeechBubble(initialSpeechBubble);
-          if (petStateIdRef.current === stateId) {
-            setPetState("idle");
-          }
-          chatReplySequenceTimerRef.current = null;
+          chatReplySequenceTimerRef.current = window.setTimeout(() => {
+            if (petStateIdRef.current === stateId && petStateSourceRef.current === "chatReply") {
+              setPetState("idle", "chatReply", { release: true });
+            }
+            chatReplySequenceTimerRef.current = null;
+          }, CHAT_REPLY_SETTLE_MS);
         }, durationMs);
       };
 
-      playNextSegment();
+      chatReplySequenceTimerRef.current = window.setTimeout(() => {
+        playNextSegment();
+      }, stateId === "message" ? 0 : CHAT_REPLY_ACK_DELAY_MS);
     },
     [clearChatReplySequenceTimer, clearConversationRestoreTimer, clearSpeechBubbleTimer, setPetState]
   );
@@ -285,16 +349,28 @@ export function App() {
   const playPetReaction = useCallback(
     (reaction: PetBehaviorReaction, restoreState = true) => {
       clearPetReactionTimer();
-      if (reaction.stateId) {
-        setPetState(reaction.stateId);
+      const currentSource = petStateSourceRef.current;
+      if (
+        PET_STATE_SOURCE_PRIORITY[currentSource] > PET_STATE_SOURCE_PRIORITY.reaction &&
+        currentSource !== "drag"
+      ) {
+        return;
       }
+
+      let stateApplied = true;
+      if (reaction.stateId) {
+        stateApplied = setPetState(reaction.stateId, "reaction");
+      }
+
+      if (!stateApplied && reaction.stateId !== petStateIdRef.current) return;
+
       showSpeechBubble(reaction.text, reaction.durationMs);
 
       if (!restoreState || !reaction.stateId) return;
 
       petReactionTimerRef.current = window.setTimeout(() => {
-        if (reaction.stateId && petStateIdRef.current === reaction.stateId) {
-          setPetState("idle");
+        if (reaction.stateId && petStateIdRef.current === reaction.stateId && petStateSourceRef.current === "reaction") {
+          setPetState("idle", "reaction", { release: true });
         }
         petReactionTimerRef.current = null;
       }, reaction.durationMs);
@@ -309,11 +385,28 @@ export function App() {
 
   const cancelIdleAmbientAction = useCallback(() => {
     clearIdleAmbientRestoreTimer();
-    if (idleAmbientStateRef.current && petStateIdRef.current === idleAmbientStateRef.current) {
-      setPetState("idle");
+    if (
+      idleAmbientStateRef.current &&
+      petStateIdRef.current === idleAmbientStateRef.current &&
+      petStateSourceRef.current === "ambient"
+    ) {
+      setPetState("idle", "ambient", { release: true });
     }
     idleAmbientStateRef.current = null;
   }, [clearIdleAmbientRestoreTimer, setPetState]);
+
+  const scheduleSystemStateRestore = useCallback(
+    (delayMs = SYSTEM_STATE_RESTORE_DELAY_MS) => {
+      clearSystemStateRestoreTimer();
+      systemStateRestoreTimerRef.current = window.setTimeout(() => {
+        if (petStateSourceRef.current === "system") {
+          setPetState("idle", "system", { release: true });
+        }
+        systemStateRestoreTimerRef.current = null;
+      }, delayMs);
+    },
+    [clearSystemStateRestoreTimer, setPetState]
+  );
 
   const scheduleIdleAmbient = useCallback(() => {
     clearIdleAmbientTimer();
@@ -339,12 +432,16 @@ export function App() {
       const reaction = getIdleAmbientReaction(behaviorMemoryRef.current);
       if (reaction.stateId) {
         idleAmbientStateRef.current = reaction.stateId;
-        setPetState(reaction.stateId);
+        setPetState(reaction.stateId, "ambient");
         showSpeechBubble(reaction.text, reaction.durationMs);
         clearIdleAmbientRestoreTimer();
         idleAmbientRestoreTimerRef.current = window.setTimeout(() => {
-          if (idleAmbientStateRef.current === reaction.stateId && petStateIdRef.current === reaction.stateId) {
-            setPetState("idle");
+          if (
+            idleAmbientStateRef.current === reaction.stateId &&
+            petStateIdRef.current === reaction.stateId &&
+            petStateSourceRef.current === "ambient"
+          ) {
+            setPetState("idle", "ambient", { release: true });
           }
           idleAmbientStateRef.current = null;
           idleAmbientRestoreTimerRef.current = null;
@@ -373,12 +470,16 @@ export function App() {
     idleTimerRef.current = window.setTimeout(() => {
       idleTimerRef.current = null;
       clearPetReactionTimer();
-      if (!conversationActiveRef.current && petStateIdRef.current !== "drag") {
+      if (
+        !conversationActiveRef.current &&
+        petStateSourceRef.current !== "drag" &&
+        (petStateSourceRef.current === "idle" || petStateSourceRef.current === "ambient")
+      ) {
         const reaction = getSleepReaction(behaviorMemoryRef.current);
         if (!reaction) {
           return;
         }
-        setPetState(reaction.stateId ?? "sleep");
+        setPetState(reaction.stateId ?? "sleep", "sleep");
         showSpeechBubble(reaction.text, reaction.durationMs);
       }
     }, idleSleepDelayMs);
@@ -387,13 +488,14 @@ export function App() {
   const registerActivity = useCallback(() => {
     cancelIdleAmbientAction();
     const wasSleeping = petStateIdRef.current === "sleep";
+    const sleepSource = petStateSourceRef.current;
     resetIdleTimer();
     if (wasSleeping) {
-      setPetState("idle");
+      setPetState("idle", sleepSource, { force: true });
       const reaction = getWakeReaction(behaviorMemoryRef.current);
-      showSpeechBubble(reaction.text, reaction.durationMs);
+      playPetReaction(reaction);
     }
-  }, [cancelIdleAmbientAction, resetIdleTimer, setPetState, showSpeechBubble]);
+  }, [cancelIdleAmbientAction, playPetReaction, resetIdleTimer, setPetState]);
 
   const saveWindowPosition = useCallback(async () => {
     try {
@@ -411,8 +513,14 @@ export function App() {
   }, []);
 
   const restoreStateAfterDrag = useCallback(() => {
-    if (petStateIdRef.current === "drag") {
-      setPetState(stateBeforeDragRef.current);
+    if (petStateSourceRef.current === "drag") {
+      const restoreStateId = stateBeforeDragRef.current;
+      const restoreSource = stateSourceBeforeDragRef.current;
+      if (restoreStateId === "idle") {
+        setPetState("idle", "drag", { release: true });
+      } else {
+        setPetState(restoreStateId, restoreSource, { force: true });
+      }
     }
   }, [setPetState]);
 
@@ -455,11 +563,9 @@ export function App() {
     registerActivity();
     clearPetReactionTimer();
     hideSpeechBubble();
-    stateBeforeDragRef.current =
-      petStateIdRef.current === "drag" || petStateIdRef.current === "pet" || petStateIdRef.current === "sleep"
-        ? "idle"
-        : petStateIdRef.current;
-    setPetState("drag");
+    stateBeforeDragRef.current = getStableStateAfterDrag(petStateIdRef.current, petStateSourceRef.current);
+    stateSourceBeforeDragRef.current = stateBeforeDragRef.current === "idle" ? "idle" : petStateSourceRef.current;
+    setPetState("drag", "drag", { force: true });
     try {
       const [windowPosition, cursor] = await Promise.all([getCurrentWindow().outerPosition(), cursorPosition()]);
       const pointerSession = pointerSessionRef.current;
@@ -504,7 +610,7 @@ export function App() {
     setConversationLastSendFailed(false);
     setConversationPanelNotice({ text: "要和卡咔说什么？", tone: "neutral" });
     setConversationPanelVisible(true);
-    setPetState("message");
+    setPetState("message", "conversation");
   }, [
     clearConversationRestoreTimer,
     clearLongPressTimer,
@@ -692,7 +798,7 @@ export function App() {
       clearIdleAmbientRestoreTimer();
       idleAmbientStateRef.current = null;
       clearPetReactionTimer();
-      setPetState(stateId);
+      setPetState(stateId, "manual", { force: true });
       const bubbleText = getStateBubbleText(stateId);
       if (bubbleText) {
         showSpeechBubble(bubbleText);
@@ -725,19 +831,30 @@ export function App() {
   const testCoreConnection = useCallback(async () => {
     registerActivity();
     clearPetReactionTimer();
+    clearSystemStateRestoreTimer();
     hideContextMenu();
-    setPetState("loading");
+    setPetState("loading", "system", { force: true });
     showSpeechBubble("正在检查核心信号...");
 
     try {
       await invoke("check_kaka_core_health");
-      setPetState("message");
+      setPetState("message", "system", { force: true });
       showSpeechBubble("核心信号正常。");
+      scheduleSystemStateRestore();
     } catch {
-      setPetState("weakSignal");
+      setPetState("weakSignal", "system", { force: true });
       showSpeechBubble("信号有点弱，核心大脑没连上。");
+      scheduleSystemStateRestore(4200);
     }
-  }, [clearPetReactionTimer, hideContextMenu, registerActivity, setPetState, showSpeechBubble]);
+  }, [
+    clearPetReactionTimer,
+    clearSystemStateRestoreTimer,
+    hideContextMenu,
+    registerActivity,
+    scheduleSystemStateRestore,
+    setPetState,
+    showSpeechBubble
+  ]);
 
   const closeConversationPanel = useCallback(() => {
     if (conversationPending) return;
@@ -747,8 +864,8 @@ export function App() {
     setConversationLastSendFailed(false);
     setConversationPanelNotice(null);
     hideSpeechBubble();
-    if (petStateIdRef.current === "message") {
-      setPetState("idle");
+    if (petStateSourceRef.current === "conversation") {
+      setPetState("idle", "conversation", { release: true });
     }
   }, [clearConversationRestoreTimer, conversationPending, hideSpeechBubble, setPetState]);
 
@@ -786,7 +903,7 @@ export function App() {
       setConversationLastSendFailed(false);
       setConversationPanelNotice({ text: "卡咔思考中...", tone: "neutral" });
       setConversationPending(true);
-      setPetState("loading");
+      setPetState("loading", "conversation", { force: true });
       appendConversationHistoryItem({ role: "owner", text });
 
       try {
@@ -808,10 +925,10 @@ export function App() {
         setConversationLastSendFailed(true);
         setConversationPanelNotice({ text: failureBubbleText, tone: "error" });
         appendConversationHistoryItem({ role: "kaka", text: failureBubbleText, failed: true });
-        setPetState("weakSignal");
+        setPetState("weakSignal", "conversation", { force: true });
         conversationRestoreTimerRef.current = window.setTimeout(() => {
-          if (petStateIdRef.current === "weakSignal") {
-            setPetState("idle");
+          if (petStateIdRef.current === "weakSignal" && petStateSourceRef.current === "conversation") {
+            setPetState("idle", "conversation", { release: true });
           }
           conversationRestoreTimerRef.current = null;
         }, Math.max(CONVERSATION_RESTORE_DELAY_MS, 3600));
@@ -851,7 +968,7 @@ export function App() {
 
     try {
       await getCurrentWindow().center();
-      setPetState("idle");
+      setPetState("idle", "system", { force: true });
       showSpeechBubble("卡咔回到屏幕中间了。");
     } catch {
       showSpeechBubble("位置重置失败了。");
@@ -975,6 +1092,7 @@ export function App() {
       idleAmbientStateRef.current = null;
       clearChatReplySequenceTimer();
       clearConversationRestoreTimer();
+      clearSystemStateRestoreTimer();
       clearPetReactionTimer();
       clearTouchReactionTimer();
       clearLongPressTimer();
@@ -986,6 +1104,7 @@ export function App() {
     clearIdleTimer,
     clearChatReplySequenceTimer,
     clearConversationRestoreTimer,
+    clearSystemStateRestoreTimer,
     clearLongPressTimer,
     clearPetReactionTimer,
     clearSpeechBubbleTimer,
