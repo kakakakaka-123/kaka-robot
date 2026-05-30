@@ -9,6 +9,7 @@ import {
   type PetWindowSizePx,
   readDesktopPetSettings,
   SETTINGS_UPDATED_EVENT,
+  TRAY_EVENT_CHECK_CORE,
   type SpeechBubbleDurationMs,
   TRAY_EVENT_RESET_POSITION,
   WINDOW_POSITION_STORAGE_KEY,
@@ -177,6 +178,7 @@ export function SettingsApp() {
     setPendingAction("core");
     setCoreStatus("checking");
     setMessage({ tone: "info", text: "正在检查核心信号..." });
+    void emit(TRAY_EVENT_CHECK_CORE);
     try {
       await invoke("check_kaka_core_health");
       setCoreStatus("ok");
