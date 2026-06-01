@@ -322,37 +322,6 @@ def check_env_file(results: list[CheckResult]) -> dict[str, str]:
         ok(results, "KAKA_OWNER_USER_IDS", "已设置，值已隐藏")
     else:
         warn(results, "KAKA_OWNER_USER_IDS", "未设置；主人关系会按普通用户判断")
-    check_int_value(results, "RELATIONSHIP_RECENT_DAYS", values.get("RELATIONSHIP_RECENT_DAYS", "7"))
-    check_int_value(
-        results,
-        "RELATIONSHIP_FAMILIAR_INPUT_COUNT",
-        values.get("RELATIONSHIP_FAMILIAR_INPUT_COUNT", "100"),
-    )
-    check_int_value(
-        results,
-        "RELATIONSHIP_FAMILIAR_RECENT_INPUT_COUNT",
-        values.get("RELATIONSHIP_FAMILIAR_RECENT_INPUT_COUNT", "30"),
-    )
-    check_int_value(
-        results,
-        "RELATIONSHIP_FAMILIAR_ACTIVE_MEMORY_COUNT",
-        values.get("RELATIONSHIP_FAMILIAR_ACTIVE_MEMORY_COUNT", "8"),
-    )
-    check_int_value(
-        results,
-        "RELATIONSHIP_REGULAR_INPUT_COUNT",
-        values.get("RELATIONSHIP_REGULAR_INPUT_COUNT", "30"),
-    )
-    check_int_value(
-        results,
-        "RELATIONSHIP_REGULAR_RECENT_INPUT_COUNT",
-        values.get("RELATIONSHIP_REGULAR_RECENT_INPUT_COUNT", "10"),
-    )
-    check_int_value(
-        results,
-        "RELATIONSHIP_REGULAR_ACTIVE_MEMORY_COUNT",
-        values.get("RELATIONSHIP_REGULAR_ACTIVE_MEMORY_COUNT", "3"),
-    )
     admin_local_only = values.get("ADMIN_LOCAL_ONLY", "true")
     check_bool_value(results, "ADMIN_LOCAL_ONLY", admin_local_only)
     admin_token = values.get("ADMIN_API_TOKEN", "")

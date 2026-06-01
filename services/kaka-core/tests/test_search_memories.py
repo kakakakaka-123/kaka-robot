@@ -183,6 +183,48 @@ def test_same_scene_memory_ranks_higher_when_text_relevance_is_equal():
     assert any("同场景" in reason for reason in results[0].reasons)
 
 
+def test_stable_preference_without_text_match_requires_reply_style_relevance():
+    module = load_script_module()
+    session_factory = create_session_factory()
+
+    with session_factory() as session:
+        user = seed_user(session, "10001")
+        scene = seed_scene(session, "group", "20002")
+        seed_memory(
+            session,
+            user,
+            scene,
+            "用户喜欢直接、务实的回答。",
+            memory_type="stable_preference",
+            confidence=0.95,
+        )
+        seed_memory(
+            session,
+            user,
+            scene,
+            "用户喜欢赛博朋克配色。",
+            memory_type="stable_preference",
+            confidence=0.95,
+        )
+        session.commit()
+
+        filters = module.SearchFilters(
+            platform="qq",
+            user_id="10001",
+            query_text="今天晚上吃什么",
+            limit=5,
+            target_scene_type="group",
+            target_scene_id="20002",
+        )
+        user = module.load_user(session, filters)
+        rows = module.load_memory_pool(session, filters, user)
+        results = module.rank_memories(rows, filters)
+
+    result_texts = [result.memory.memory_text for result in results]
+    assert "用户喜欢直接、务实的回答。" in result_texts
+    assert "用户喜欢赛博朋克配色。" not in result_texts
+
+
 def create_session_factory():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

@@ -83,6 +83,7 @@ class LLMSettings:
     tool_model: str
     temperature: float
     max_tokens: int
+    request_timeout_seconds: float
 
     @property
     def can_call_remote(self) -> bool:
@@ -200,6 +201,7 @@ def get_settings() -> Settings:
             tool_model=os.getenv("LLM_TOOL_MODEL", "deepseek-v4-flash"),
             temperature=_get_float("LLM_TEMPERATURE", 0.7),
             max_tokens=_get_int("LLM_MAX_TOKENS", 800),
+            request_timeout_seconds=_get_float("LLM_REQUEST_TIMEOUT", 60.0),
         ),
         memory_analysis=MemoryAnalysisSettings(
             enabled=_get_bool("MEMORY_AUTO_ANALYSIS_ENABLED", False),

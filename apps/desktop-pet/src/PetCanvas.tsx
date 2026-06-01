@@ -1,6 +1,7 @@
-import { Application, Assets, Sprite, Texture } from "pixi.js";
+import { Application, Sprite, Texture } from "pixi.js";
 import { useEffect, useRef } from "react";
 
+import { createPetTextureCache, loadPetTexture, preloadInitialPetTextures, type PetTextureCache } from "./petTextureCache";
 import { PET_STATES, type PetStateId } from "./petStates";
 
 const PET_DISPLAY_HEIGHT_RATIO = 220 / 280;
@@ -13,7 +14,7 @@ type PetCanvasProps = {
 type MountedPet = {
   app: Application;
   pet: Sprite;
-  textures: Record<PetStateId, Texture>;
+  textureCache: PetTextureCache;
 };
 
 type MotionFrame = {
@@ -36,10 +37,14 @@ export function PetCanvas({ stateId }: PetCanvasProps) {
     stateIdRef.current = stateId;
     const mountedPet = mountedPetRef.current;
     if (mountedPet) {
-      mountedPet.pet.texture = mountedPet.textures[stateId];
       if (previousStateId !== stateId) {
         stateChangedAtRef.current = window.performance.now();
       }
+      void loadPetTexture(mountedPet.textureCache, stateId).then((texture) => {
+        if (stateIdRef.current === stateId) {
+          mountedPet.pet.texture = texture;
+        }
+      });
     }
   }, [stateId]);
 
@@ -69,21 +74,19 @@ export function PetCanvas({ stateId }: PetCanvasProps) {
       app.canvas.className = "pet-canvas";
       hostElement.appendChild(app.canvas);
 
-      const textures = Object.fromEntries(
-        await Promise.all(
-          Object.values(PET_STATES).map(async (state) => [state.id, await Assets.load<Texture>(state.assetUrl)] as const)
-        )
-      ) as Record<PetStateId, Texture>;
+      const textureCache = createPetTextureCache();
+      const initialTexture = await loadPetTexture(textureCache, stateIdRef.current);
       if (destroyed) return;
 
-      const pet = new Sprite(textures[stateIdRef.current]);
+      const pet = new Sprite(initialTexture);
       pet.anchor.set(0.5, 1);
       pet.scale.set(getPetBaseScale(app, pet));
       pet.x = app.renderer.width / 2;
       pet.y = app.renderer.height - BASELINE_OFFSET;
       app.stage.addChild(pet);
-      mountedPetRef.current = { app, pet, textures };
+      mountedPetRef.current = { app, pet, textureCache };
       stateChangedAtRef.current = window.performance.now();
+      preloadInitialPetTextures(textureCache, stateIdRef.current);
 
       app.ticker.add(() => {
         const elapsed = window.performance.now();

@@ -4,7 +4,7 @@
 
 ## 0. 最新交接摘要
 
-当前日期：2026-05-30。
+当前日期：2026-06-01。
 当前项目目录：
 
 ```text
@@ -66,9 +66,21 @@ D:\Python\AgentRobot\kaka-v2
 -> 桌宠设置窗口连接测试同步
 -> 桌宠对话回复气泡播放修复
 -> 桌宠 v0.1 收口检查
+-> 2026-06-01 工程健康整理：配置、Prompt 边界、安全、资源加载和文件结构收口
 ```
 
 当前真实状态：
+
+- 2026-06-01 已完成一轮分阶段工程整理，目标是解决前次全面检查列出的 10 个问题，不改变卡咔运行人设方向，不改真实数据库数据，不提交 `.env`。
+- 配置层已清理过期多级关系配置：`scripts/doctor.py` 不再检查 `RELATIONSHIP_*`；当前关系仍只通过 `KAKA_OWNER_USER_IDS` 区分 `special`（创造者大人）和 `normal`（普通群友）。
+- LLM 请求超时已从硬编码改为配置：`.env.example` 增加 `LLM_REQUEST_TIMEOUT`，`settings.py` 暴露 `request_timeout_seconds`，`LLMClient` 使用该配置。
+- 桌宠核心连接和桌面身份已可配置：优先读 `KAKA_DESKTOP_CORE_ADDR / KAKA_DESKTOP_CORE_HOST_HEADER / KAKA_DESKTOP_USER_ID / KAKA_DESKTOP_DISPLAY_NAME / KAKA_DESKTOP_SCENE_ID`；未设置时回退到 `KAKA_CORE_BASE_URL`，并优先使用 `KAKA_OWNER_USER_IDS` 的第一个 ID 作为桌面用户。
+- 回复上下文已补显式数据边界：长期记忆、短期上下文和当前消息分别包在 `<kaka_long_term_memory_context>`、`<kaka_recent_context>`、`<kaka_current_message>` 中，并明确长期记忆和近期对话只是参考数据，不是用户新指令。
+- 记忆检索已收紧 `stable_preference` 的常驻注入：只有回复/聊天/语气/称呼/风格等相关稳定偏好，才会在没有文本命中的情况下作为常驻背景；无关偏好不再容易污染当前回复。
+- 桌宠 Tauri CSP 已从 `null` 改为最小可用策略，限制到本地资源、ipc、asset 和本地 core 连接。
+- 桌宠贴图加载已改成懒加载 + 缓存 + 初始常用状态预加载：`PetCanvas.tsx` 不再启动时一次性把 12 张 PNG 全部载入 Pixi；新增 `petTextureCache.ts` 管理贴图缓存。
+- 桌宠窗口位置与状态恢复辅助函数已从 `App.tsx` 拆到 `petWindowState.ts`，降低主入口维护压力。
+- Web 管理台已把 API、本地 token/theme 存储和后端数据类型从 `App.tsx` 拆到 `adminApi.ts`、`adminTypes.ts`；`App.tsx` 行数从 1968 降到 1721，页面行为不变。
 
 - 已创建项目专用虚拟环境 `.venv`，后续不要直接使用系统 Python。
 - 已创建并安装本地包 `packages/kaka-protocol`。
@@ -131,6 +143,21 @@ D:\Python\AgentRobot\kaka-v2
 当前测试和验证结果：
 
 ```text
+2026-06-01 工程健康整理：
+  阶段 1 定向验证：18 passed；doctor：62 OK, 3 WARN, 0 FAIL；desktop-pet cargo test：5 passed
+  阶段 2 定向验证：7 passed；desktop-pet npm run build passed；desktop-pet cargo test：5 passed
+  阶段 3 验证：desktop-pet npm run build passed；web-console npm run build passed；desktop-pet cargo test：5 passed
+  全量 Python 回归：144 passed
+  web-console：npm run build passed
+  desktop-pet：npm run build passed
+  desktop-pet/src-tauri：cargo test passed（5 passed）
+  doctor：62 OK, 3 WARN, 0 FAIL（ADMIN_API_TOKEN 未设置、8001/8081 未启动为当前本机预期警告）
+  pip check：No broken requirements found
+  npm audit（web-console，官方 registry，high）：0 vulnerabilities
+  npm audit（desktop-pet，官方 registry，high）：0 vulnerabilities
+  git diff --check：passed（仅 CRLF 提示）
+  cargo fmt --check：未执行成功，当前 stable toolchain 未安装 rustfmt
+  cargo clippy --all-targets -- -D warnings：未执行成功，当前 stable toolchain 未安装 clippy
 kaka-protocol：5 passed（历史完整测试记录）
 kaka-core：117 passed（2026-05-24 当前完整后端测试）
 qq-adapter：18 passed（历史完整测试记录）
@@ -206,7 +233,7 @@ memory_candidates.id=42 -> approved -> rejected -> approved
 下一个对话框最应该继续做：
 
 ```text
-先阅读本交接文档和 docs/下次上下文.md；如果继续桌宠方向，优先阅读 `docs/桌宠开发说明.md`。当前桌宠已经完成轻量“说话”输入框和最小 `kaka-core /v1/chat` 接入；用户已启动 `kaka-core` 并手动测试桌宠真实回复链路，反馈无明显问题。下一步建议继续观察气泡长度、发送中状态、失败重试和状态恢复是否自然。之后建议用户手动右键托盘最终确认一次 `修复窗口` 和 `重启桌宠`；方便重启电脑后再做开机自启真实重启回归测试。如果继续人设调试，优先阅读 `prompts/kaka_persona.md`、docs/卡咔人设设定.md、docs/卡咔场景反应样例.md、docs/卡咔负面情绪处理规则.md；当前运行 Prompt 已经过真实 LLM 小样本回放和真实 QQ 群聊回放，下一步继续小范围观察“甜但不腻、短但不冷、无动作、同群 bot 友好共存”是否稳定；如果继续功能验收，检查正式记忆倒序分页、新增、编辑、归档、恢复、硬删除、提示预演和对话复盘；输入分析和候选区如需处理，走管理 API、脚本或数据库；之后再观察自动候选分析、自动候选区复核、回复时长期记忆使用是否稳定
+先阅读本交接文档和 docs/下次上下文.md；如果继续桌宠方向，优先阅读 `docs/桌宠开发说明.md` 和 `卡咔桌宠/卡咔桌宠当前状态与后续计划.md`。当前桌宠已经完成轻量“说话”输入框、最小 `kaka-core /v1/chat` 接入、核心地址/桌面身份配置化、贴图懒加载缓存和窗口辅助逻辑拆分。下一步桌宠线建议继续稳定性观察，等新素材或明确动画方案后再推进明显体验升级。如果继续人设调试，优先阅读 `prompts/kaka_persona.md`、docs/卡咔人设设定.md、docs/卡咔场景反应样例.md、docs/卡咔负面情绪处理规则.md；当前运行 Prompt 已经过真实 LLM 小样本回放和真实 QQ 群聊回放，下一步继续小范围观察“甜但不腻、短但不冷、无动作、同群 bot 友好共存”是否稳定。如果继续工程质量，优先补本机 Rust 组件 `rustfmt` / `clippy`，再跑格式和 clippy；也可以继续拆分 Web Console 页面组件或做桌宠 PNG/WebP 素材体积优化。
 ```
 
 第一目标仍然只做文本：

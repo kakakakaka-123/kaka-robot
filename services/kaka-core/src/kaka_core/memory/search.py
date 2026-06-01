@@ -12,6 +12,17 @@ from kaka_core.storage.models import MemoryRecord, SceneRecord, UserRecord, utc_
 LOCAL_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
 ACTIVE_MEMORY_STATUS = "active"
 GENERAL_MEMORY_TYPES = {"stable_preference"}
+REPLY_STYLE_PREFERENCE_TERMS = {
+    "回复",
+    "回答",
+    "说话",
+    "聊天",
+    "语气",
+    "称呼",
+    "风格",
+    "表达",
+    "卡咔",
+}
 
 TYPE_WEIGHTS = {
     "stable_preference": 1.8,
@@ -168,8 +179,8 @@ def score_memory(
         matched_terms,
     )
 
-    is_general = memory.memory_type in GENERAL_MEMORY_TYPES
-    if text_match_score <= 0 and not is_general:
+    general_without_text_match = text_match_score <= 0 and is_reply_style_general_memory(memory)
+    if text_match_score <= 0 and not general_without_text_match:
         return MemorySearchResult(
             memory=memory,
             scene=scene,
@@ -180,6 +191,8 @@ def score_memory(
 
     score = text_match_score
     reasons = list(text_match_reasons)
+    if general_without_text_match:
+        reasons.append("稳定回复偏好可作为常驻背景")
 
     scene_score, scene_reasons = score_scene(scene, filters)
     score += scene_score
@@ -233,6 +246,13 @@ def score_text_match(
         reasons.append("记忆文本完整命中当前消息 +6.0")
 
     return score, reasons
+
+
+def is_reply_style_general_memory(memory: MemoryRecord) -> bool:
+    if memory.memory_type not in GENERAL_MEMORY_TYPES:
+        return False
+    text = f"{memory.memory_text} {memory.source_text or ''}"
+    return any(term in text for term in REPLY_STYLE_PREFERENCE_TERMS)
 
 
 def score_scene(

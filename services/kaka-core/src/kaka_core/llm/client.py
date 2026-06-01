@@ -53,7 +53,7 @@ class LLMClient:
 
         url = f"{self._settings.base_url}/chat/completions"
 
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=self._settings.request_timeout_seconds) as client:
             response = await client.post(url, headers=headers, json=payload)
 
         if response.status_code >= 400:

@@ -21,191 +21,27 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-
-type Summary = {
-  counts: Record<string, number>;
-  memory_statuses: Record<string, number>;
-  recent_auto_job_runs: AutoJobRun[];
-  settings: Record<string, string | number | boolean | null | undefined>;
-  server_time: string;
-};
-
-type AutoJobRun = {
-  id: number;
-  job_name: string;
-  job_label: string;
-  status: string;
-  status_label: string;
-  reason: string;
-  checked_count: number;
-  processed_runs: number;
-  inserted_count: number;
-  updated_count: number;
-  skipped_count: number;
-  error_count: number;
-  error_message?: string | null;
-  started_at: string;
-  finished_at: string;
-  duration_seconds: number;
-};
-
-type AutoJobName = "auto_analysis" | "auto_review";
-
-type AutoJobTriggerSummary = {
-  checked_count: number;
-  ran: boolean;
-  reason: string;
-  processed_runs: number;
-  candidates_inserted?: number;
-  skipped_marked?: number;
-  analyzed_marked?: number;
-  approved?: number;
-  rejected?: number;
-  duplicates?: number;
-  errors?: number;
-};
-
-type AutoJobTriggerResponse = {
-  job_name: AutoJobName;
-  job_label: string;
-  force: boolean;
-  summary: AutoJobTriggerSummary;
-  latest_run?: AutoJobRun | null;
-};
-
-type UserInfo = {
-  platform_user_id: string;
-  display_name: string;
-};
-
-type SceneInfo = {
-  scene_type: string;
-  scene_type_label: string;
-  scene_id: string;
-};
-
-type Memory = {
-  id: number;
-  source_candidate_id?: number | null;
-  candidate_id?: number | null;
-  memory_text: string;
-  normalized_text: string;
-  memory_type: string;
-  confidence: number;
-  source_text: string;
-  source: string;
-  status: string;
-  merge_reason: string;
-  created_at: string;
-  updated_at: string;
-  user?: UserInfo | null;
-  scene?: SceneInfo | null;
-};
-
-type SearchResult = {
-  memory: Memory;
-  scene?: SceneInfo | null;
-  score: number;
-  matched_terms: string[];
-  reasons: string[];
-};
-
-type ReplyContextMessage = {
-  role: string;
-  content: string;
-};
-
-type ReplyContextLayer = {
-  name: string;
-  title: string;
-  role: string;
-  content: string;
-};
-
-type ReplyContextPreview = {
-  messages: ReplyContextMessage[];
-  layers: ReplyContextLayer[];
-  metadata: Record<string, unknown>;
-  used_memory_ids: number[];
-  memory_count: number;
-  memory_injection_enabled: boolean;
-};
-
-type OutputInfo = {
-  id: number;
-  output_id: string;
-  output_origin: string;
-  output_reason: string;
-  should_reply: boolean;
-  no_reply_reason?: string | null;
-  content_text: string;
-  metadata?: Record<string, unknown>;
-  created_at: string;
-};
-
-type Conversation = {
-  id: number;
-  event_id: string;
-  content_type: string;
-  content_text: string;
-  analysis_status: string;
-  created_at: string;
-  created_at_iso: string;
-  user?: UserInfo | null;
-  scene?: SceneInfo | null;
-  output?: OutputInfo | null;
-  reply_state: string;
-};
-
-type ConversationDetail = {
-  conversation: Conversation;
-  metadata: Record<string, unknown>;
-  used_memory_ids: number[];
-  used_memories: Memory[];
-  short_context_input_ids: number[];
-  short_context: Conversation[];
-};
-
-type SearchForm = {
-  user_id: string;
-  group_id: string;
-  text: string;
-  private: boolean;
-  min_score: number;
-};
-
-type ConversationFilters = {
-  ids: string;
-  user_id: string;
-  group_id: string;
-  date: string;
-  reply_state: string;
-};
-
-type MemoryFilters = {
-  ids: string;
-  user_id: string;
-  group_id: string;
-  date: string;
-  memory_type: string;
-};
-
-type MemoryForm = {
-  user_id: string;
-  display_name: string;
-  group_id: string;
-  private: boolean;
-  memory_text: string;
-  memory_type: string;
-  confidence: number;
-  source_text: string;
-  status: "active" | "archived";
-  merge_reason: string;
-};
-
-type MemoryStatusFilter = "active" | "archived" | "all";
-type PageKey = "overview" | "memories" | "prompt" | "replay" | "status" | "reserved";
-type ThemeMode = "light" | "dark";
+import { api, buildQuery, readAdminToken, readThemeMode, writeAdminToken, writeThemeMode } from "./adminApi";
+import type {
+  AutoJobName,
+  AutoJobRun,
+  AutoJobTriggerResponse,
+  Conversation,
+  ConversationDetail,
+  ConversationFilters,
+  Memory,
+  MemoryFilters,
+  MemoryForm,
+  MemoryStatusFilter,
+  PageKey,
+  ReplyContextPreview,
+  SceneInfo,
+  SearchForm,
+  SearchResult,
+  Summary,
+  ThemeMode,
+  UserInfo
+} from "./adminTypes";
 
 type NavItem = {
   id: PageKey;
@@ -213,8 +49,6 @@ type NavItem = {
   icon: LucideIcon;
 };
 
-const adminTokenStorageKey = "kaka_admin_token";
-const themeStorageKey = "kaka_admin_theme";
 const memoryPageSize = 50;
 const conversationPageSize = 50;
 
@@ -299,87 +133,6 @@ const emptyMemoryForm: MemoryForm = {
   status: "active",
   merge_reason: ""
 };
-
-async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const headers = new Headers(options?.headers);
-  if (options?.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  const adminToken = readAdminToken();
-  if (adminToken && !headers.has("X-Kaka-Admin-Token")) {
-    headers.set("X-Kaka-Admin-Token", adminToken);
-  }
-
-  const response = await fetch(`/admin/api${path}`, { ...options, headers });
-  if (!response.ok) {
-    let message = response.statusText;
-    try {
-      const body = (await response.json()) as { detail?: unknown };
-      if (typeof body.detail === "string") {
-        message = body.detail;
-      } else if (body.detail) {
-        message = JSON.stringify(body.detail);
-      }
-    } catch {
-      const text = await response.text();
-      if (text) {
-        message = text;
-      }
-    }
-    throw new Error(message);
-  }
-
-  return response.json() as Promise<T>;
-}
-
-function readAdminToken(): string {
-  try {
-    return sessionStorage.getItem(adminTokenStorageKey)?.trim() ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function writeAdminToken(value: string): void {
-  try {
-    const token = value.trim();
-    if (token) {
-      sessionStorage.setItem(adminTokenStorageKey, token);
-    } else {
-      sessionStorage.removeItem(adminTokenStorageKey);
-    }
-  } catch {
-    return;
-  }
-}
-
-function readThemeMode(): ThemeMode {
-  try {
-    return localStorage.getItem(themeStorageKey) === "dark" ? "dark" : "light";
-  } catch {
-    return "light";
-  }
-}
-
-function writeThemeMode(value: ThemeMode): void {
-  try {
-    localStorage.setItem(themeStorageKey, value);
-  } catch {
-    return;
-  }
-}
-
-function buildQuery(params: Record<string, string | number | null | undefined>): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    const text = String(value ?? "").trim();
-    if (text) {
-      query.set(key, text);
-    }
-  }
-  return query.toString();
-}
 
 function formatUser(user?: UserInfo | null): string {
   if (!user) return "-";

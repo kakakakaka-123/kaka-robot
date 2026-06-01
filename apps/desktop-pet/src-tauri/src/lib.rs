@@ -27,8 +27,10 @@ const TRAY_EVENT_RESET_POSITION: &str = "kaka-tray-reset-position";
 const TRAY_EVENT_CHECK_CORE: &str = "kaka-tray-check-core";
 const FROM_AUTOSTART_ARG: &str = "--from-autostart";
 const STARTUP_SETTINGS_FILE_NAME: &str = "desktop-pet-startup.json";
-const KAKA_CORE_ADDR: &str = "127.0.0.1:8001";
-const KAKA_CORE_HOST_HEADER: &str = "127.0.0.1:8001";
+const DEFAULT_KAKA_CORE_ADDR: &str = "127.0.0.1:8001";
+const DEFAULT_DESKTOP_USER_ID: &str = "desktop-owner";
+const DEFAULT_DESKTOP_DISPLAY_NAME: &str = "主人";
+const DEFAULT_DESKTOP_SCENE_ID: &str = "desktop-local";
 const CHAT_CONNECT_TIMEOUT_MS: u64 = 1500;
 const CHAT_IO_TIMEOUT_SECONDS: u64 = 70;
 
@@ -36,6 +38,27 @@ const CHAT_IO_TIMEOUT_SECONDS: u64 = 70;
 struct TrayState {
     show_hide_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     autostart_item: Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DesktopCoreConfig {
+    core_addr: String,
+    host_header: String,
+    user_id: String,
+    display_name: String,
+    scene_id: String,
+}
+
+impl Default for DesktopCoreConfig {
+    fn default() -> Self {
+        Self {
+            core_addr: DEFAULT_KAKA_CORE_ADDR.to_string(),
+            host_header: DEFAULT_KAKA_CORE_ADDR.to_string(),
+            user_id: DEFAULT_DESKTOP_USER_ID.to_string(),
+            display_name: DEFAULT_DESKTOP_DISPLAY_NAME.to_string(),
+            scene_id: DEFAULT_DESKTOP_SCENE_ID.to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -137,8 +160,10 @@ fn center_main_window(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn check_kaka_core_health() -> Result<(), String> {
+    let config = read_desktop_core_config();
     let mut stream = TcpStream::connect_timeout(
-        &KAKA_CORE_ADDR
+        &config
+            .core_addr
             .parse()
             .map_err(|error| format!("invalid address: {error}"))?,
         Duration::from_millis(900),
@@ -152,8 +177,12 @@ fn check_kaka_core_health() -> Result<(), String> {
         .set_write_timeout(Some(Duration::from_millis(900)))
         .map_err(|error| format!("set write timeout failed: {error}"))?;
 
+    let request = format!(
+        "GET /health HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        config.host_header
+    );
     stream
-        .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1:8001\r\nConnection: close\r\n\r\n")
+        .write_all(request.as_bytes())
         .map_err(|error| format!("request failed: {error}"))?;
 
     let mut response = String::new();
@@ -181,24 +210,26 @@ fn send_desktop_chat_message_blocking(text: String) -> Result<String, String> {
         return Err("message text is empty".to_string());
     }
 
-    let body = build_desktop_chat_request_body(trimmed_text);
+    let config = read_desktop_core_config();
+    let body = build_desktop_chat_request_body(trimmed_text, &config);
     let response = post_kaka_core_json(
         "/v1/chat",
         &body,
+        &config,
         Duration::from_millis(CHAT_CONNECT_TIMEOUT_MS),
         Duration::from_secs(CHAT_IO_TIMEOUT_SECONDS),
     )?;
     extract_chat_reply_text(&response)
 }
 
-fn build_desktop_chat_request_body(text: &str) -> String {
+fn build_desktop_chat_request_body(text: &str, config: &DesktopCoreConfig) -> String {
     json!({
         "event_id": build_desktop_event_id(),
         "platform": "desktop",
         "scene_type": "private",
-        "scene_id": "desktop-local",
-        "user_id": "desktop-owner",
-        "display_name": "主人",
+        "scene_id": config.scene_id,
+        "user_id": config.user_id,
+        "display_name": config.display_name,
         "content": {
             "type": "text",
             "text": text
@@ -223,14 +254,143 @@ fn build_desktop_event_id() -> String {
     format!("desktop-{timestamp_ms}")
 }
 
+fn read_desktop_core_config() -> DesktopCoreConfig {
+    let default_config = DesktopCoreConfig::default();
+    let core_addr = read_config_value("KAKA_DESKTOP_CORE_ADDR")
+        .or_else(|| read_config_value("KAKA_CORE_BASE_URL").and_then(|value| core_addr_from_base_url(&value)))
+        .unwrap_or(default_config.core_addr);
+    let host_header = read_config_value("KAKA_DESKTOP_CORE_HOST_HEADER")
+        .unwrap_or_else(|| core_addr.clone());
+    let owner_user_id = read_config_value("KAKA_OWNER_USER_IDS")
+        .and_then(|value| first_csv_value(&value));
+    let user_id = read_config_value("KAKA_DESKTOP_USER_ID")
+        .or(owner_user_id)
+        .unwrap_or(default_config.user_id);
+    let display_name = read_config_value("KAKA_DESKTOP_DISPLAY_NAME")
+        .unwrap_or(default_config.display_name);
+    let scene_id = read_config_value("KAKA_DESKTOP_SCENE_ID")
+        .unwrap_or(default_config.scene_id);
+
+    DesktopCoreConfig {
+        core_addr,
+        host_header,
+        user_id,
+        display_name,
+        scene_id,
+    }
+}
+
+fn read_config_value(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| normalize_config_value(&value))
+        .or_else(|| read_dotenv_value(name))
+}
+
+fn read_dotenv_value(name: &str) -> Option<String> {
+    for path in candidate_dotenv_paths() {
+        let Ok(content) = fs::read_to_string(path) else {
+            continue;
+        };
+        if let Some(value) = dotenv_value_from_text(&content, name) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn candidate_dotenv_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(exe_path) = std::env::current_exe() {
+        push_ancestor_dotenv_paths(&mut paths, exe_path.as_path());
+    }
+    if let Ok(current_dir) = std::env::current_dir() {
+        push_ancestor_dotenv_paths(&mut paths, current_dir.as_path());
+    }
+    paths
+}
+
+fn push_ancestor_dotenv_paths(paths: &mut Vec<PathBuf>, start: &std::path::Path) {
+    for ancestor in start.ancestors() {
+        let candidate = ancestor.join(".env");
+        if !paths.contains(&candidate) {
+            paths.push(candidate);
+        }
+    }
+}
+
+fn dotenv_value_from_text(content: &str, name: &str) -> Option<String> {
+    for raw_line in content.lines() {
+        let mut line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(stripped) = line.strip_prefix("export ") {
+            line = stripped.trim();
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != name {
+            continue;
+        }
+        return normalize_config_value(value);
+    }
+    None
+}
+
+fn normalize_config_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let unquoted = if trimmed.len() >= 2 {
+        let first = trimmed.as_bytes()[0] as char;
+        let last = trimmed.as_bytes()[trimmed.len() - 1] as char;
+        if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+            &trimmed[1..trimmed.len() - 1]
+        } else {
+            trimmed
+        }
+    } else {
+        trimmed
+    };
+    let normalized = unquoted.trim();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_string())
+    }
+}
+
+fn first_csv_value(value: &str) -> Option<String> {
+    value.split(',').find_map(normalize_config_value)
+}
+
+fn core_addr_from_base_url(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let without_scheme = trimmed
+        .strip_prefix("http://")
+        .or_else(|| trimmed.strip_prefix("https://"))?;
+    let authority = without_scheme.split('/').next()?.trim();
+    let host = authority.rsplit('@').next()?.trim();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
 fn post_kaka_core_json(
     path: &str,
     body: &str,
+    config: &DesktopCoreConfig,
     connect_timeout: Duration,
     io_timeout: Duration,
 ) -> Result<String, String> {
     let mut stream = TcpStream::connect_timeout(
-        &KAKA_CORE_ADDR
+        &config
+            .core_addr
             .parse()
             .map_err(|error| format!("invalid address: {error}"))?,
         connect_timeout,
@@ -245,7 +405,8 @@ fn post_kaka_core_json(
         .map_err(|error| format!("set write timeout failed: {error}"))?;
 
     let request = format!(
-        "POST {path} HTTP/1.1\r\nHost: {KAKA_CORE_HOST_HEADER}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST {path} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        config.host_header,
         body.len()
     );
     stream
@@ -612,6 +773,38 @@ mod tests {
         let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 2\r\n\r\n{}";
 
         assert!(extract_http_body(response).is_err());
+    }
+
+    #[test]
+    fn parses_core_addr_from_base_url() {
+        assert_eq!(
+            core_addr_from_base_url("http://127.0.0.1:8001").unwrap(),
+            "127.0.0.1:8001"
+        );
+        assert_eq!(
+            core_addr_from_base_url("https://example.test:9443/admin").unwrap(),
+            "example.test:9443"
+        );
+    }
+
+    #[test]
+    fn desktop_chat_request_uses_configured_identity() {
+        let config = DesktopCoreConfig {
+            core_addr: "127.0.0.1:8001".to_string(),
+            host_header: "127.0.0.1:8001".to_string(),
+            user_id: "10001".to_string(),
+            display_name: "创造者大人".to_string(),
+            scene_id: "desktop-room".to_string(),
+        };
+
+        let body = build_desktop_chat_request_body("你好", &config);
+        let value: Value = serde_json::from_str(&body).unwrap();
+
+        assert_eq!(value["platform"], "desktop");
+        assert_eq!(value["user_id"], "10001");
+        assert_eq!(value["display_name"], "创造者大人");
+        assert_eq!(value["scene_id"], "desktop-room");
+        assert_eq!(value["content"]["text"], "你好");
     }
 }
 
