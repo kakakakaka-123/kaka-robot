@@ -50,6 +50,14 @@ def _get_csv_set(name: str) -> frozenset[str]:
     return frozenset(item for item in items if item)
 
 
+def _get_csv_tuple(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    items = [item.strip() for item in value.split(",")]
+    return tuple(item for item in items if item)
+
+
 def _resolve_path(value: str, *, base_dir: Path) -> Path:
     path = Path(value).expanduser()
     if path.is_absolute():
@@ -156,6 +164,17 @@ class AdminSettings:
 
 
 @dataclass(frozen=True)
+class PluginSettings:
+    """插件系统配置。
+
+    默认关闭，避免支线能力影响主线聊天行为。
+    """
+
+    enabled: bool
+    command_prefixes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Settings:
     """卡咔核心服务总配置。"""
 
@@ -168,6 +187,7 @@ class Settings:
     relationship: RelationshipSettings
     persona: PersonaSettings
     admin: AdminSettings
+    plugins: PluginSettings
 
 
 @lru_cache
@@ -237,5 +257,12 @@ def get_settings() -> Settings:
         admin=AdminSettings(
             local_only=_get_bool("ADMIN_LOCAL_ONLY", True),
             api_token=os.getenv("ADMIN_API_TOKEN", "").strip(),
+        ),
+        plugins=PluginSettings(
+            enabled=_get_bool("PLUGIN_SYSTEM_ENABLED", False),
+            command_prefixes=_get_csv_tuple(
+                "PLUGIN_COMMAND_PREFIXES",
+                ("插件：", "插件:", "plugin:"),
+            ),
         ),
     )

@@ -60,15 +60,15 @@ class BypassLockState:
         self.lock = asyncio.Lock()
 
 
-def make_event() -> MessageEvent:
+def make_event(text: str = "你好", *, event_id: str = "chat-event-1") -> MessageEvent:
     return MessageEvent(
-        event_id="chat-event-1",
+        event_id=event_id,
         platform=Platform.QQ,
         scene_type=SceneType.PRIVATE,
         scene_id="10001",
         user_id="10001",
         display_name="主人",
-        content=MessageContent.text_message("你好"),
+        content=MessageContent.text_message(text),
         timestamp=datetime(2026, 5, 5, 1, 10, tzinfo=timezone.utc),
     )
 
@@ -224,6 +224,48 @@ async def test_generate_chat_response_uses_router_when_llm_enabled(monkeypatch, 
     assert response.actions[0].content is not None
     assert response.actions[0].content.text == "我在，刚刚听见了。"
     assert response.metadata["llm_model"] == "deepseek-v4-flash"
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_generate_chat_response_ignores_plugin_command_when_plugins_disabled(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'plugin-disabled.sqlite3'}")
+    monkeypatch.setenv("LLM_ENABLED", "false")
+    monkeypatch.setenv("PLUGIN_SYSTEM_ENABLED", "false")
+    get_settings.cache_clear()
+
+    response = await generate_chat_response(
+        make_event("插件：memory_search 回复", event_id="plugin-disabled-event")
+    )
+
+    assert response.actions[0].content is not None
+    assert response.actions[0].content.text == "收到 主人 的消息：插件：memory_search 回复"
+    assert "plugin_id" not in response.metadata
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_generate_chat_response_handles_memory_plugin_command(monkeypatch, tmp_path) -> None:
+    database_url = f"sqlite:///{tmp_path / 'plugin-memory.sqlite3'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("LLM_ENABLED", "false")
+    monkeypatch.setenv("PLUGIN_SYSTEM_ENABLED", "true")
+    get_settings.cache_clear()
+    seed_memory_database(database_url)
+
+    response = await generate_chat_response(
+        make_event("插件：memory_search 回复", event_id="plugin-memory-event")
+    )
+
+    assert response.actions[0].content is not None
+    assert "卡咔找到这些相关记忆" in response.actions[0].content.text
+    assert "我喜欢回复先给结论。" in response.actions[0].content.text
+    assert response.metadata["plugin_handled"] is True
+    assert response.metadata["plugin_id"] == "memory_search"
+    assert response.metadata["memory_count"] == 1
     get_settings.cache_clear()
 
 

@@ -2,10 +2,12 @@ import asyncio
 import re
 from dataclasses import dataclass
 
-from kaka_core.config.settings import get_settings
+from kaka_core.config.settings import PluginSettings, get_settings
 from kaka_core.context.builder import build_reply_context, classify_scene
 from kaka_core.llm.client import LLMClientError
 from kaka_core.llm.router import LLMRouter
+from kaka_core.plugins.result import PluginResult
+from kaka_core.plugins.runtime import create_default_plugin_runtime
 from kaka_core.storage.database import create_session_factory, init_database
 from kaka_core.storage.repository import (
     load_input_by_event_id,
@@ -198,6 +200,11 @@ async def generate_chat_response(
                 return existing_response
 
             settings = get_settings()
+            plugin_response = await generate_plugin_response_if_available(event, settings.plugins)
+            if plugin_response is not None:
+                record_conversation_safely(event, plugin_response)
+                return plugin_response
+
             if not settings.llm.can_call_remote:
                 response = generate_fallback_response(event, reason="llm_disabled_or_missing_key")
                 record_conversation_safely(event, response)
@@ -287,6 +294,34 @@ def release_event_processing_lock_safely(event_id: str, owner_token: str) -> Non
             release_event_processing_lock(session, event_id, owner_token)
     except Exception:  # noqa: BLE001
         return
+
+
+async def generate_plugin_response_if_available(
+    event: MessageEvent,
+    plugin_settings: PluginSettings,
+) -> KakaResponse | None:
+    runtime = create_default_plugin_runtime(
+        enabled=plugin_settings.enabled,
+        command_prefixes=plugin_settings.command_prefixes,
+    )
+    result = await runtime.run_for_event(event)
+    if result is None:
+        return None
+    return plugin_result_to_response(result, event_id=event.event_id)
+
+
+def plugin_result_to_response(result: PluginResult, *, event_id: str) -> KakaResponse:
+    if result.should_reply:
+        response = KakaResponse.text_reply(result.text, event_id=event_id)
+    else:
+        response = KakaResponse.no_reply(event_id=event_id, reason="plugin_no_reply")
+
+    response.metadata.update(result.metadata)
+    if result.data:
+        response.metadata["plugin_data"] = result.data
+    response.metadata["plugin_handled"] = True
+    response.metadata["plugin_id"] = result.plugin_id
+    return response
 
 
 def sanitize_llm_reply(reply: str, *, scene: str, relationship_level: str) -> str:
