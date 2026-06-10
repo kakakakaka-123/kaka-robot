@@ -408,8 +408,11 @@ def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path)
     assert data["used_memory_ids"] == [1]
     assert data["messages"][0]["role"] == "system"
     assert data["messages"][0]["content"].startswith("你是管理台预览里的卡咔。")
+    assert "回复风格规范" in data["messages"][0]["content"]
     assert "可参考的长期记忆" in data["messages"][0]["content"]
     assert "用户喜欢直接的回答。" in data["messages"][0]["content"]
+    assert "本次场景策略" in data["messages"][0]["content"]
+    assert "发送前自检" in data["messages"][0]["content"]
     assert data["messages"][1]["role"] == "user"
     assert "近期对话" in data["messages"][1]["content"]
     assert "测试用户：我正在开发卡咔。" in data["messages"][1]["content"]
@@ -423,17 +426,23 @@ def test_admin_reply_context_preview_reuses_reply_builder(monkeypatch, tmp_path)
     assert data["metadata"]["persona_prompt_fallback_used"] is False
     assert data["metadata"]["context_layer_names"] == [
         "persona",
+        "reply_style",
         "relationship",
         "memory",
+        "scene_strategy",
+        "output_guard",
         "recent_context",
         "current_message",
     ]
     assert [layer["name"] for layer in data["layers"]] == data["metadata"]["context_layer_names"]
     assert data["layers"][0]["title"] == "基础人设"
-    assert data["layers"][1]["title"] == "关系上下文"
-    assert data["layers"][2]["title"] == "长期记忆"
-    assert data["layers"][3]["title"] == "短期上下文"
-    assert data["layers"][4]["title"] == "当前消息"
+    assert data["layers"][1]["title"] == "回复风格规范"
+    assert data["layers"][2]["title"] == "关系上下文"
+    assert data["layers"][3]["title"] == "长期记忆"
+    assert data["layers"][4]["title"] == "本次场景策略"
+    assert data["layers"][5]["title"] == "发送前自检"
+    assert data["layers"][6]["title"] == "短期上下文"
+    assert data["layers"][7]["title"] == "当前消息"
     assert "relationship_input_count" not in data["metadata"]
     assert "当前说话者关系" in data["messages"][0]["content"]
 

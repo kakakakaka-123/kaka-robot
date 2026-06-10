@@ -61,18 +61,10 @@ impl Default for DesktopCoreConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StartupSettings {
     show_pet_on_autostart: bool,
-}
-
-impl Default for StartupSettings {
-    fn default() -> Self {
-        Self {
-            show_pet_on_autostart: false,
-        }
-    }
 }
 
 #[tauri::command]
@@ -257,19 +249,21 @@ fn build_desktop_event_id() -> String {
 fn read_desktop_core_config() -> DesktopCoreConfig {
     let default_config = DesktopCoreConfig::default();
     let core_addr = read_config_value("KAKA_DESKTOP_CORE_ADDR")
-        .or_else(|| read_config_value("KAKA_CORE_BASE_URL").and_then(|value| core_addr_from_base_url(&value)))
+        .or_else(|| {
+            read_config_value("KAKA_CORE_BASE_URL")
+                .and_then(|value| core_addr_from_base_url(&value))
+        })
         .unwrap_or(default_config.core_addr);
-    let host_header = read_config_value("KAKA_DESKTOP_CORE_HOST_HEADER")
-        .unwrap_or_else(|| core_addr.clone());
-    let owner_user_id = read_config_value("KAKA_OWNER_USER_IDS")
-        .and_then(|value| first_csv_value(&value));
+    let host_header =
+        read_config_value("KAKA_DESKTOP_CORE_HOST_HEADER").unwrap_or_else(|| core_addr.clone());
+    let owner_user_id =
+        read_config_value("KAKA_OWNER_USER_IDS").and_then(|value| first_csv_value(&value));
     let user_id = read_config_value("KAKA_DESKTOP_USER_ID")
         .or(owner_user_id)
         .unwrap_or(default_config.user_id);
-    let display_name = read_config_value("KAKA_DESKTOP_DISPLAY_NAME")
-        .unwrap_or(default_config.display_name);
-    let scene_id = read_config_value("KAKA_DESKTOP_SCENE_ID")
-        .unwrap_or(default_config.scene_id);
+    let display_name =
+        read_config_value("KAKA_DESKTOP_DISPLAY_NAME").unwrap_or(default_config.display_name);
+    let scene_id = read_config_value("KAKA_DESKTOP_SCENE_ID").unwrap_or(default_config.scene_id);
 
     DesktopCoreConfig {
         core_addr,
@@ -440,8 +434,8 @@ fn ensure_success_status(headers: &str) -> Result<(), String> {
 }
 
 fn extract_chat_reply_text(body: &str) -> Result<String, String> {
-    let value: Value =
-        serde_json::from_str(body).map_err(|error| format!("invalid chat response JSON: {error}"))?;
+    let value: Value = serde_json::from_str(body)
+        .map_err(|error| format!("invalid chat response JSON: {error}"))?;
 
     if value.get("should_reply").and_then(Value::as_bool) == Some(false) {
         return Ok("卡咔听到了，但这次先不说话。".to_string());
@@ -523,10 +517,7 @@ fn read_startup_settings(app: &tauri::AppHandle) -> Result<StartupSettings, Stri
     serde_json::from_str(&raw_value).map_err(|error| error.to_string())
 }
 
-fn write_startup_settings(
-    app: &tauri::AppHandle,
-    settings: StartupSettings,
-) -> Result<(), String> {
+fn write_startup_settings(app: &tauri::AppHandle, settings: StartupSettings) -> Result<(), String> {
     let path = startup_settings_path(app)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -617,7 +608,11 @@ fn sync_main_window_menu(app: &tauri::AppHandle, visible: bool) {
         .unwrap()
         .clone();
     if let Some(menu_item) = menu_item {
-        let text = if visible { "隐藏卡咔" } else { "显示卡咔" };
+        let text = if visible {
+            "隐藏卡咔"
+        } else {
+            "显示卡咔"
+        };
         let _ = menu_item.set_text(text);
     }
 }
@@ -632,9 +627,7 @@ fn set_autostart_enabled_internal(app: &tauri::AppHandle, enabled: bool) -> Resu
     };
 
     result.map_err(|error| error.to_string())?;
-    let current_enabled = autolaunch
-        .is_enabled()
-        .map_err(|error| error.to_string())?;
+    let current_enabled = autolaunch.is_enabled().map_err(|error| error.to_string())?;
     sync_autostart_menu(app, current_enabled);
     Ok(current_enabled)
 }
@@ -666,7 +659,8 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let repair_windows_item =
         MenuItemBuilder::with_id(TRAY_MENU_REPAIR_WINDOWS, "修复窗口").build(app)?;
     let check_core = MenuItemBuilder::with_id(TRAY_MENU_CHECK_CORE, "连接测试").build(app)?;
-    let restart_app_item = MenuItemBuilder::with_id(TRAY_MENU_RESTART_APP, "重启桌宠").build(app)?;
+    let restart_app_item =
+        MenuItemBuilder::with_id(TRAY_MENU_RESTART_APP, "重启桌宠").build(app)?;
     let quit = MenuItemBuilder::with_id(TRAY_MENU_QUIT, "退出").build(app)?;
 
     let menu = MenuBuilder::new(app)
@@ -729,6 +723,47 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .manage(TrayState::default())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec![FROM_AUTOSTART_ARG]),
+        ))
+        .setup(|app| {
+            setup_tray(app)?;
+            refresh_autostart_registration(app.handle());
+            apply_initial_main_window_visibility(app.handle());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            center_main_window,
+            check_kaka_core_health,
+            get_autostart_enabled,
+            get_main_window_visible,
+            get_startup_settings,
+            quit_app,
+            send_desktop_chat_message,
+            set_autostart_enabled,
+            set_main_window_always_on_top,
+            set_main_window_size,
+            set_main_window_visible,
+            set_startup_settings,
+            show_settings_window
+        ])
+        .on_window_event(|window, event| {
+            if window.label() == SETTINGS_WINDOW_LABEL {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .run(tauri::generate_context!())
+        .expect("failed to run Kaka desktop pet");
 }
 
 #[cfg(test)]
@@ -806,45 +841,4 @@ mod tests {
         assert_eq!(value["scene_id"], "desktop-room");
         assert_eq!(value["content"]["text"], "你好");
     }
-}
-
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
-        .manage(TrayState::default())
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            Some(vec![FROM_AUTOSTART_ARG]),
-        ))
-        .setup(|app| {
-            setup_tray(app)?;
-            refresh_autostart_registration(app.handle());
-            apply_initial_main_window_visibility(app.handle());
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            center_main_window,
-            check_kaka_core_health,
-            get_autostart_enabled,
-            get_main_window_visible,
-            get_startup_settings,
-            quit_app,
-            send_desktop_chat_message,
-            set_autostart_enabled,
-            set_main_window_always_on_top,
-            set_main_window_size,
-            set_main_window_visible,
-            set_startup_settings,
-            show_settings_window
-        ])
-        .on_window_event(|window, event| {
-            if window.label() == SETTINGS_WINDOW_LABEL {
-                if let WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-            }
-        })
-        .run(tauri::generate_context!())
-        .expect("failed to run Kaka desktop pet");
 }

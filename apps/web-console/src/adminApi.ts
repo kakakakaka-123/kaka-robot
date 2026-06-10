@@ -16,24 +16,33 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
 
   const response = await fetch(`/admin/api${path}`, { ...options, headers });
   if (!response.ok) {
-    let message = response.statusText;
-    try {
-      const body = (await response.json()) as { detail?: unknown };
-      if (typeof body.detail === "string") {
-        message = body.detail;
-      } else if (body.detail) {
-        message = JSON.stringify(body.detail);
-      }
-    } catch {
-      const text = await response.text();
-      if (text) {
-        message = text;
-      }
-    }
-    throw new Error(message);
+    throw new Error(await parseErrorMessage(response));
   }
 
   return response.json() as Promise<T>;
+}
+
+async function parseErrorMessage(response: Response): Promise<string> {
+  const fallback = response.statusText || `HTTP ${response.status}`;
+  let text = "";
+
+  try {
+    text = await response.text();
+  } catch {
+    return fallback;
+  }
+
+  if (!text) return fallback;
+
+  try {
+    const body = JSON.parse(text) as { detail?: unknown };
+    if (typeof body.detail === "string") return body.detail;
+    if (body.detail) return JSON.stringify(body.detail);
+  } catch {
+    return text;
+  }
+
+  return text;
 }
 
 export function readAdminToken(): string {

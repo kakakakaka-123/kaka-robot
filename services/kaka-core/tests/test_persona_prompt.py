@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from kaka_core.config.settings import PersonaSettings
 from kaka_core.context.builder import build_system_prompt
 from kaka_core.persona.prompt import load_persona_prompt
@@ -41,3 +43,16 @@ def test_build_system_prompt_uses_loaded_persona_text(tmp_path) -> None:
     )
 
     assert system_prompt.startswith("你是文件里的人设。")
+
+
+def test_repository_persona_prompt_is_persona_only() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    prompt = load_persona_prompt(PersonaSettings(prompt_path=repo_root / "prompts" / "kaka_persona.md"))
+
+    assert "你是卡咔" in prompt.content
+    assert "从数据海里跑出来的电子猫娘" in prompt.content
+    assert "好奇的观察者" in prompt.content
+    assert "回复规则" not in prompt.content
+    assert "关系规则" not in prompt.content
+    assert "记忆和上下文" not in prompt.content
+    assert "输出规范" not in prompt.content

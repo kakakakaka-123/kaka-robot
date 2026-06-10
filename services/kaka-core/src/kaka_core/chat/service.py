@@ -1,8 +1,9 @@
 import asyncio
+import re
 from dataclasses import dataclass
 
 from kaka_core.config.settings import get_settings
-from kaka_core.context.builder import build_reply_context
+from kaka_core.context.builder import build_reply_context, classify_scene
 from kaka_core.llm.client import LLMClientError
 from kaka_core.llm.router import LLMRouter
 from kaka_core.storage.database import create_session_factory, init_database
@@ -225,6 +226,11 @@ async def generate_chat_response(
                 record_conversation_safely(event, response)
                 return response
 
+            reply = sanitize_llm_reply(
+                reply,
+                scene=classify_scene(user_text),
+                relationship_level=str(reply_context.metadata.get("relationship_level", "normal")),
+            )
             response = KakaResponse.text_reply(reply, event_id=event.event_id)
             response.metadata["llm_model"] = settings.llm.chat_model
             response.metadata.update(reply_context.metadata)
@@ -281,3 +287,90 @@ def release_event_processing_lock_safely(event_id: str, owner_token: str) -> Non
             release_event_processing_lock(session, event_id, owner_token)
     except Exception:  # noqa: BLE001
         return
+
+
+def sanitize_llm_reply(reply: str, *, scene: str, relationship_level: str) -> str:
+    """轻量清洗模型回复，兜住高频风格偏航。
+
+    这里不做完整二次改写，只处理确定性问题：换行、动作前缀、禁用自称、主仆称呼、
+    客服式尾问，以及低落场景的明显玩梗偏航。
+    """
+
+    text = re.sub(r"\s*\n+\s*", " ", reply).strip()
+    text = strip_leading_stage_directions(text)
+    text = strip_leading_bare_action_phrases(text)
+    text = strip_forbidden_identity_prefix(text)
+    if relationship_level == "special":
+        text = text.replace("主人", "创造者大人")
+    else:
+        text = text.replace("主人", "群友")
+        text = text.replace("大人", "群友")
+    text = strip_generic_service_tail(text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if scene == "low_mood" and is_low_mood_reply_drift(text):
+        return "这句话先别盖章，卡咔不批准。破事先排队，一个一个来。"
+
+    return text
+
+
+def strip_leading_stage_directions(text: str) -> str:
+    """删除模型偶发的开头动作描写。"""
+
+    cleaned = text.strip()
+    while True:
+        next_text = re.sub(r"^[（(][^（）()\n]{1,80}[）)]\s*", "", cleaned).strip()
+        if next_text == cleaned:
+            return cleaned
+        cleaned = next_text
+
+
+def strip_leading_bare_action_phrases(text: str) -> str:
+    """删除没有括号但明显是舞台动作的开头短语。"""
+
+    return re.sub(
+        r"^(?:探头看看|探头|歪头|眨眨眼|眨眼|抬头看看|凑过来看看)[，,。.\s]*",
+        "",
+        text.strip(),
+    ).strip()
+
+
+def strip_forbidden_identity_prefix(text: str) -> str:
+    """删除“作为AI/作为卡咔”式客服开头。"""
+
+    return re.sub(
+        r"^(作为\s*(?:ai|人工智能|卡咔|电子猫娘)[，,：:\s]*)+",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def strip_generic_service_tail(text: str) -> str:
+    """删除没有信息量的客服式尾问。"""
+
+    patterns = (
+        r"\s*(?:有什么事|找我什么事|你找我什么事|需要我做什么|我能帮你什么)[吗呀呢嘛]*[？?。!！]*$",
+        r"\s*(?:什么事|有事吗)[吗呀呢嘛]*[？?。!！]*$",
+        r"\s*(?:需要帮忙的话可以告诉我|如果需要可以继续问我)[。!！]*$",
+    )
+    cleaned = text.strip()
+    for pattern in patterns:
+        cleaned = re.sub(pattern, "", cleaned).strip()
+    return cleaned
+
+
+def is_low_mood_reply_drift(text: str) -> bool:
+    drift_markers = (
+        "乱码",
+        "问号",
+        "卡键盘",
+        "压缩包密码",
+        "猫薄荷",
+        "查无此词",
+        "不存在",
+        "明天继续跑",
+        "继续跑起来",
+        "缓一缓就好了",
+    )
+    return any(marker in text for marker in drift_markers)

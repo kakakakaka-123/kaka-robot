@@ -44,6 +44,8 @@ export function PetCanvas({ stateId }: PetCanvasProps) {
         if (stateIdRef.current === stateId) {
           mountedPet.pet.texture = texture;
         }
+      }).catch((error: unknown) => {
+        console.warn(`Failed to switch pet texture to "${stateId}".`, error);
       });
     }
   }, [stateId]);
@@ -102,7 +104,11 @@ export function PetCanvas({ stateId }: PetCanvasProps) {
       });
     }
 
-    void mount(host);
+    void mount(host).catch((error: unknown) => {
+      if (!destroyed) {
+        console.warn("Failed to mount pet canvas.", error);
+      }
+    });
 
     return () => {
       destroyed = true;

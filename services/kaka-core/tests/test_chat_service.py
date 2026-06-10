@@ -1,11 +1,17 @@
 import asyncio
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
-from kaka_core.chat.service import generate_chat_response, observe_message
+from kaka_core.chat.service import generate_chat_response, observe_message, sanitize_llm_reply
 from kaka_core.config.settings import get_settings
+from kaka_core.context.builder import build_current_message_prompt, build_reply_style_prompt, classify_scene
+from kaka_core.context.builder import build_relationship_prompt
+from kaka_core.context.builder import build_scene_strategy_prompt
 from kaka_core.llm.client import ChatMessage
+from kaka_core.relationship.context import RelationshipContext
 from kaka_core.storage.database import create_database_engine, init_database
 from kaka_core.storage.models import (
     InputRecord,
@@ -18,6 +24,13 @@ from kaka_core.storage.models import (
 from kaka_protocol import MessageContent, MessageEvent, Platform, SceneType
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
+
+
+GOLDEN_SCENARIOS_PATH = Path(__file__).parent / "fixtures" / "kaka_reply_golden_scenarios.json"
+
+
+def load_golden_scenarios() -> list[dict[str, object]]:
+    return json.loads(GOLDEN_SCENARIOS_PATH.read_text(encoding="utf-8"))
 
 
 class FakeRouter:
@@ -60,6 +73,144 @@ def make_event() -> MessageEvent:
     )
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("卡咔你是谁呀", "identity"),
+        ("卡咔你是谁家的呀", "ownership"),
+        ("这个AI好有趣", "called_ai"),
+        ("卡咔，月白说家猫也有自由意志", "peer_bot"),
+        ("卡咔，我普池出了个没有的角色", "sharing"),
+        ("卡咔，我要累死啦，今天全是破事", "low_mood"),
+        ("卡咔你对群里bot不能有敌意的哦", "conflict"),
+        ("卡咔下午好", "daily_call"),
+    ],
+)
+def test_classify_scene_prioritizes_reply_scenarios(text: str, expected: str) -> None:
+    assert classify_scene(text) == expected
+
+
+@pytest.mark.parametrize("scenario", load_golden_scenarios(), ids=lambda item: str(item["id"]))
+def test_golden_reply_scenarios_have_expected_scene(scenario: dict[str, object]) -> None:
+    assert classify_scene(str(scenario["user_text"])) == scenario["scene"]
+
+
+def test_reply_style_prompt_prioritizes_comfortable_affinity() -> None:
+    prompt = build_reply_style_prompt()
+
+    assert "舒服优先" in prompt
+    assert "默认愿意接话" in prompt
+    assert "短不是冷" in prompt
+
+
+def test_scene_strategy_prompt_names_reply_intent() -> None:
+    prompt = build_scene_strategy_prompt("卡咔摸摸头")
+
+    assert "本次回复目的" in prompt
+    assert "让对方觉得被接住" in prompt
+
+
+def test_peer_bot_strategy_rejects_win_loss_comparison() -> None:
+    prompt = build_scene_strategy_prompt("隔壁机器人也很可爱")
+
+    assert "不说输赢" in prompt
+    assert "不争排名" in prompt
+
+
+def test_current_message_prompt_adds_scene_focus_for_daily_call() -> None:
+    prompt = build_current_message_prompt(make_event(), "卡咔")
+
+    assert "本次当前消息场景：daily_call" in prompt
+    assert "忽略近期上下文里未被再次提起的旧话题" in prompt
+    assert "舒服、可爱、短但不冷" in prompt
+
+
+def test_current_message_prompt_adds_scene_focus_for_identity() -> None:
+    prompt = build_current_message_prompt(make_event(), "卡咔你是谁呀")
+
+    assert "本次当前消息场景：identity" in prompt
+    assert "身份问题只用一句短句回答" in prompt
+
+
+def test_current_message_prompt_adds_scene_focus_for_low_mood() -> None:
+    prompt = build_current_message_prompt(make_event(), "卡咔，我感觉我最近真的好没用")
+
+    assert "本次当前消息场景：low_mood" in prompt
+    assert "不要否定对方感受" in prompt
+    assert "不要围绕“没用”等负面词做文字游戏" in prompt
+
+
+def test_relationship_prompt_rejects_master_style_titles() -> None:
+    special_prompt = build_relationship_prompt(
+        RelationshipContext(level="special", is_owner=True),
+        "无妄生欢",
+    )
+    normal_prompt = build_relationship_prompt(
+        RelationshipContext(level="normal", is_owner=False),
+        "普通群友",
+    )
+
+    assert "不要称呼对方为“主人”" in special_prompt
+    assert "不要称呼对方为“创造者大人”“主人”或“大人”" in normal_prompt
+
+
+def test_sanitize_llm_reply_collapses_daily_newlines() -> None:
+    reply = sanitize_llm_reply(
+        "在呢在呢。\n\n刚才去旧话题那边绕了一圈。",
+        scene="daily_call",
+        relationship_level="special",
+    )
+
+    assert reply == "在呢在呢。 刚才去旧话题那边绕了一圈。"
+
+
+def test_sanitize_llm_reply_replaces_master_title() -> None:
+    normal_reply = sanitize_llm_reply(
+        "下午好主人，今天信号不错。",
+        scene="daily_call",
+        relationship_level="normal",
+    )
+    special_reply = sanitize_llm_reply(
+        "下午好主人，今天信号不错。",
+        scene="daily_call",
+        relationship_level="special",
+    )
+
+    assert "主人" not in normal_reply
+    assert normal_reply == "下午好群友，今天信号不错。"
+    assert special_reply == "下午好创造者大人，今天信号不错。"
+
+
+def test_sanitize_llm_reply_uses_low_mood_fallback_for_drift() -> None:
+    reply = sanitize_llm_reply(
+        "你搁这卡键盘呢？这串问号我都想拿去当压缩包密码了。",
+        scene="low_mood",
+        relationship_level="normal",
+    )
+
+    assert reply == "这句话先别盖章，卡咔不批准。破事先排队，一个一个来。"
+
+
+def test_sanitize_llm_reply_removes_action_and_forbidden_identity_prefix() -> None:
+    reply = sanitize_llm_reply(
+        "（耳朵动了动）作为AI，我在呢。\n有什么事吗？",
+        scene="daily_call",
+        relationship_level="normal",
+    )
+
+    assert reply == "我在呢。"
+
+
+def test_sanitize_llm_reply_removes_bare_action_prefix_and_generic_question_tail() -> None:
+    reply = sanitize_llm_reply(
+        "探头看看，你说得对，隔壁确实有点可爱。不过卡咔也有自己的特长哦。什么事？",
+        scene="peer_bot",
+        relationship_level="normal",
+    )
+
+    assert reply == "你说得对，隔壁确实有点可爱。不过卡咔也有自己的特长哦。"
+
+
 @pytest.mark.anyio
 async def test_generate_chat_response_uses_router_when_llm_enabled(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'router-test.sqlite3'}")
@@ -96,10 +247,17 @@ async def test_generate_chat_response_uses_persona_prompt_file(monkeypatch, tmp_
     assert response.metadata["persona_prompt_fallback_used"] is False
     assert response.metadata["context_layer_names"] == [
         "persona",
+        "reply_style",
         "relationship",
+        "scene_strategy",
+        "output_guard",
         "current_message",
     ]
-    assert response.metadata["context_layer_count"] == 3
+    assert response.metadata["context_layer_count"] == 6
+    assert "回复风格规范" in router.messages[0].content
+    assert "本次场景策略" in router.messages[0].content
+    assert "发送前自检" in router.messages[0].content
+    assert "不要写动作描写" in router.messages[0].content
     assert "persona_prompt_error" not in response.metadata
     get_settings.cache_clear()
 
@@ -175,8 +333,11 @@ async def test_generate_chat_response_injects_relevant_memories(monkeypatch, tmp
     assert response.metadata["used_memory_ids"] == [1]
     assert response.metadata["context_layer_names"] == [
         "persona",
+        "reply_style",
         "relationship",
         "memory",
+        "scene_strategy",
+        "output_guard",
         "current_message",
     ]
     get_settings.cache_clear()
@@ -446,7 +607,10 @@ async def test_generate_chat_response_injects_short_context(monkeypatch, tmp_pat
     assert response.metadata["short_context_window_minutes"] == 30
     assert response.metadata["context_layer_names"] == [
         "persona",
+        "reply_style",
         "relationship",
+        "scene_strategy",
+        "output_guard",
         "recent_context",
         "current_message",
     ]
