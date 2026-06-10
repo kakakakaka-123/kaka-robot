@@ -270,6 +270,31 @@ async def test_generate_chat_response_handles_memory_plugin_command(monkeypatch,
 
 
 @pytest.mark.anyio
+async def test_generate_chat_response_handles_n8n_plugin_missing_config(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'plugin-n8n-missing-config.sqlite3'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("LLM_ENABLED", "false")
+    monkeypatch.setenv("PLUGIN_SYSTEM_ENABLED", "true")
+    monkeypatch.delenv("PLUGIN_N8N_WEBHOOK_BASE_URL", raising=False)
+    get_settings.cache_clear()
+
+    response = await generate_chat_response(
+        make_event("插件：n8n github_trending ai agent", event_id="plugin-n8n-missing-config")
+    )
+
+    assert response.actions[0].content is not None
+    assert "还没有配置 n8n webhook 地址" in response.actions[0].content.text
+    assert response.metadata["plugin_handled"] is True
+    assert response.metadata["plugin_id"] == "n8n"
+    assert response.metadata["plugin_error"] == "missing_n8n_webhook_base_url"
+    assert response.metadata["workflow"] == "github_trending"
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
 async def test_generate_chat_response_uses_persona_prompt_file(monkeypatch, tmp_path) -> None:
     database_url = f"sqlite:///{tmp_path / 'persona-file-test.sqlite3'}"
     persona_path = tmp_path / "persona.md"

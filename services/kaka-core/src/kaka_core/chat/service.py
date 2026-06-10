@@ -303,6 +303,8 @@ async def generate_plugin_response_if_available(
     runtime = create_default_plugin_runtime(
         enabled=plugin_settings.enabled,
         command_prefixes=plugin_settings.command_prefixes,
+        n8n_webhook_base_url=plugin_settings.n8n_webhook_base_url,
+        n8n_webhook_timeout_seconds=plugin_settings.n8n_webhook_timeout_seconds,
     )
     result = await runtime.run_for_event(event)
     if result is None:

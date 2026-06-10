@@ -121,7 +121,43 @@ Run: `.\.venv\Scripts\python.exe -m pytest services\kaka-core\tests\test_chat_se
 
 Expected: tests pass.
 
-### Task 5: Verification and Commit
+### Task 5: n8n Webhook External Plugin
+
+**Files:**
+- Create: `services/kaka-core/src/kaka_core/plugins/builtin/n8n_webhook.py`
+- Modify: `services/kaka-core/src/kaka_core/plugins/runtime.py`
+- Modify: `services/kaka-core/src/kaka_core/plugins/__init__.py`
+- Modify: `services/kaka-core/src/kaka_core/plugins/builtin/__init__.py`
+- Modify: `services/kaka-core/src/kaka_core/config/settings.py`
+- Modify: `.env.example`
+- Test: `services/kaka-core/tests/test_plugins.py`
+- Test: `services/kaka-core/tests/test_chat_service.py`
+
+- [ ] **Step 1: Write failing tests for n8n webhook behavior**
+
+Add tests proving `插件：n8n github_trending ai agent` posts a platform-agnostic payload to `<base-url>/github_trending`, converts `{ "text": "...", "data": {}, "metadata": {} }` into `PluginResult`, and reports a clear configuration error when the base URL is missing.
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `.\.venv\Scripts\python.exe -m pytest services\kaka-core\tests\test_plugins.py -q`
+
+Expected: import failure for `N8nWebhookPlugin`.
+
+- [ ] **Step 3: Implement n8n webhook plugin**
+
+Create `N8nWebhookPlugin` with ID `n8n`. It parses the first command token as the workflow name, posts normalized context to the workflow webhook, supports plain text or JSON responses, and returns `PluginResult`.
+
+- [ ] **Step 4: Register n8n plugin by default**
+
+Add `PLUGIN_N8N_WEBHOOK_BASE_URL` and `PLUGIN_N8N_WEBHOOK_TIMEOUT` to settings, pass them into `create_default_plugin_runtime()`, and include the plugin in the default registry. Keep `PLUGIN_SYSTEM_ENABLED=false` by default.
+
+- [ ] **Step 5: Run n8n plugin tests**
+
+Run: `.\.venv\Scripts\python.exe -m pytest services\kaka-core\tests\test_plugins.py services\kaka-core\tests\test_chat_service.py -q`
+
+Expected: tests pass.
+
+### Task 6: Verification and Commit
 
 **Files:**
 - All files changed above.

@@ -172,6 +172,8 @@ class PluginSettings:
 
     enabled: bool
     command_prefixes: tuple[str, ...]
+    n8n_webhook_base_url: str
+    n8n_webhook_timeout_seconds: float
 
 
 @dataclass(frozen=True)
@@ -264,5 +266,7 @@ def get_settings() -> Settings:
                 "PLUGIN_COMMAND_PREFIXES",
                 ("插件：", "插件:", "plugin:"),
             ),
+            n8n_webhook_base_url=os.getenv("PLUGIN_N8N_WEBHOOK_BASE_URL", "").rstrip("/"),
+            n8n_webhook_timeout_seconds=_get_float("PLUGIN_N8N_WEBHOOK_TIMEOUT", 30.0),
         ),
     )

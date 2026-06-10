@@ -1,12 +1,15 @@
 from datetime import datetime, timezone
+import json
 
 import pytest
+import httpx
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from kaka_core.plugins import (
     KakaPlugin,
     MemorySearchPlugin,
+    N8nWebhookPlugin,
     PluginContext,
     PluginRegistry,
     PluginResult,
@@ -81,12 +84,16 @@ def test_plugin_settings_are_disabled_by_default(monkeypatch) -> None:
 def test_plugin_settings_can_enable_runtime(monkeypatch) -> None:
     monkeypatch.setenv("PLUGIN_SYSTEM_ENABLED", "true")
     monkeypatch.setenv("PLUGIN_COMMAND_PREFIXES", "插件：,tool:")
+    monkeypatch.setenv("PLUGIN_N8N_WEBHOOK_BASE_URL", "http://127.0.0.1:5678/webhook/kaka")
+    monkeypatch.setenv("PLUGIN_N8N_WEBHOOK_TIMEOUT", "12.5")
     get_settings.cache_clear()
 
     settings = get_settings().plugins
 
     assert settings.enabled is True
     assert settings.command_prefixes == ("插件：", "tool:")
+    assert settings.n8n_webhook_base_url == "http://127.0.0.1:5678/webhook/kaka"
+    assert settings.n8n_webhook_timeout_seconds == 12.5
 
     get_settings.cache_clear()
 
@@ -131,6 +138,68 @@ async def test_memory_search_plugin_uses_normalized_context_without_platform_ada
     assert result.plugin_id == "memory_search"
     assert "用户正在研究卡咔插件系统。" in result.text
     assert result.metadata["memory_count"] >= 1
+
+
+@pytest.mark.anyio
+async def test_n8n_webhook_plugin_posts_normalized_payload_and_returns_text() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["payload"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "text": "今天有 3 个值得看的项目。",
+                "data": {"count": 3},
+                "metadata": {"source": "n8n-test"},
+            },
+        )
+
+    plugin = N8nWebhookPlugin(
+        base_url="http://n8n.local/webhook/kaka",
+        transport=httpx.MockTransport(handler),
+    )
+    context = PluginContext.from_event(
+        make_event("插件：n8n github_trending ai agent"),
+        command_text="github_trending ai agent",
+    )
+
+    result = await plugin.run(context)
+
+    assert captured["url"] == "http://n8n.local/webhook/kaka/github_trending"
+    assert captured["payload"] == {
+        "workflow": "github_trending",
+        "input": "ai agent",
+        "event_id": "plugin-event-1",
+        "platform": "qq",
+        "scene_type": "group",
+        "scene_id": "20002",
+        "user_id": "10001",
+        "display_name": "无妄生欢",
+        "text": "插件：n8n github_trending ai agent",
+        "metadata": {"source": "test"},
+    }
+    assert result.plugin_id == "n8n"
+    assert result.text == "今天有 3 个值得看的项目。"
+    assert result.data == {"count": 3}
+    assert result.metadata["workflow"] == "github_trending"
+    assert result.metadata["source"] == "n8n-test"
+
+
+@pytest.mark.anyio
+async def test_n8n_webhook_plugin_reports_missing_base_url() -> None:
+    plugin = N8nWebhookPlugin(base_url="")
+    context = PluginContext.from_event(
+        make_event("插件：n8n github_trending ai agent"),
+        command_text="github_trending ai agent",
+    )
+
+    result = await plugin.run(context)
+
+    assert result.plugin_id == "n8n"
+    assert "还没有配置 n8n webhook 地址" in result.text
+    assert result.metadata["plugin_error"] == "missing_n8n_webhook_base_url"
 
 
 def create_memory_session_factory():

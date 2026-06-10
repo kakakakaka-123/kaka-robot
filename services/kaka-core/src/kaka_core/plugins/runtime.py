@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from kaka_core.plugins.builtin.memory_search import MemorySearchPlugin
+from kaka_core.plugins.builtin.n8n_webhook import N8nWebhookPlugin
 from kaka_core.plugins.context import PluginContext
 from kaka_core.plugins.registry import PluginRegistry
 from kaka_core.plugins.result import PluginResult
@@ -75,8 +76,18 @@ def create_default_plugin_runtime(
     *,
     enabled: bool,
     command_prefixes: tuple[str, ...] = DEFAULT_COMMAND_PREFIXES,
+    n8n_webhook_base_url: str = "",
+    n8n_webhook_timeout_seconds: float = 30.0,
 ) -> PluginRuntime:
-    registry = PluginRegistry([MemorySearchPlugin()])
+    registry = PluginRegistry(
+        [
+            MemorySearchPlugin(),
+            N8nWebhookPlugin(
+                base_url=n8n_webhook_base_url,
+                timeout_seconds=n8n_webhook_timeout_seconds,
+            ),
+        ]
+    )
     return PluginRuntime(
         registry,
         enabled=enabled,
