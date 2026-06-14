@@ -65,6 +65,21 @@ def test_send_api_rejects_missing_token(monkeypatch) -> None:
     assert fake_bot.group_messages == []
 
 
+def test_send_api_rejects_missing_token_before_body_validation(monkeypatch) -> None:
+    monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
+    fake_bot = FakeBot()
+    client = TestClient(create_send_api(lambda: fake_bot))
+
+    response = client.post(
+        "/v1/send",
+        content=b"{not-json",
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 401
+    assert fake_bot.group_messages == []
+
+
 def test_send_api_rejects_wrong_token(monkeypatch) -> None:
     monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
     fake_bot = FakeBot()
@@ -80,12 +95,66 @@ def test_send_api_rejects_wrong_token(monkeypatch) -> None:
     assert fake_bot.group_messages == []
 
 
+def test_send_api_rejects_wrong_token_before_body_validation(monkeypatch) -> None:
+    monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
+    fake_bot = FakeBot()
+    client = TestClient(create_send_api(lambda: fake_bot))
+
+    response = client.post(
+        "/v1/send",
+        content=b"{not-json",
+        headers={
+            "Authorization": "Bearer wrong-token",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert response.status_code == 401
+    assert fake_bot.group_messages == []
+
+
+def test_send_api_accepts_valid_token_before_rejecting_malformed_body(monkeypatch) -> None:
+    monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
+    fake_bot = FakeBot()
+    client = TestClient(create_send_api(lambda: fake_bot))
+
+    response = client.post(
+        "/v1/send",
+        content=b"{not-json",
+        headers={
+            "Authorization": "Bearer qq-send-token",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert response.status_code == 422
+    assert fake_bot.group_messages == []
+
+
 def test_send_api_returns_503_when_token_unconfigured(monkeypatch) -> None:
     monkeypatch.delenv("QQ_ADAPTER_SEND_TOKEN", raising=False)
     fake_bot = FakeBot()
     client = TestClient(create_send_api(lambda: fake_bot))
 
     response = client.post("/v1/send", json=make_request().model_dump(mode="json"))
+
+    assert response.status_code == 503
+    assert fake_bot.group_messages == []
+
+
+def test_send_api_returns_503_when_token_unconfigured_before_body_validation(monkeypatch) -> None:
+    monkeypatch.delenv("QQ_ADAPTER_SEND_TOKEN", raising=False)
+    fake_bot = FakeBot()
+    client = TestClient(create_send_api(lambda: fake_bot))
+
+    response = client.post(
+        "/v1/send",
+        content=b"{not-json",
+        headers={
+            "Authorization": "Bearer qq-send-token",
+            "Content-Type": "application/json",
+        },
+    )
 
     assert response.status_code == 503
     assert fake_bot.group_messages == []

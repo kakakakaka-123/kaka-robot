@@ -1,7 +1,9 @@
 from collections.abc import Callable
+from json import JSONDecodeError
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, Request, status
+from pydantic import ValidationError
 
 from kaka_protocol import ContentType, NotificationRequest, NotificationResult, Platform, SceneType
 from qq_adapter.config import get_settings
@@ -46,19 +48,28 @@ def create_send_api(get_bot: Callable[[], Any]) -> FastAPI:
 
     @app.post("/v1/send", response_model=NotificationResult)
     async def send(
-        request: NotificationRequest,
+        request: Request,
         authorization: str | None = Header(default=None),
     ) -> NotificationResult:
         _require_send_token(authorization)
-        if request.target.platform != Platform.QQ:
+        try:
+            payload = await request.json()
+            notification = NotificationRequest.model_validate(payload)
+        except (JSONDecodeError, ValidationError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="invalid notification request",
+            ) from exc
+
+        if notification.target.platform != Platform.QQ:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"unsupported platform: {request.target.platform}",
+                detail=f"unsupported platform: {notification.target.platform}",
             )
 
         try:
             bot = get_bot()
-            await send_notification_request(bot, request)
+            await send_notification_request(bot, notification)
         except RuntimeError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -70,8 +81,8 @@ def create_send_api(get_bot: Callable[[], Any]) -> FastAPI:
         return NotificationResult(
             accepted=True,
             delivered=True,
-            target=request.target,
-            metadata={"adapter": "qq", "source": request.source},
+            target=notification.target,
+            metadata={"adapter": "qq", "source": notification.source},
         )
 
     return app

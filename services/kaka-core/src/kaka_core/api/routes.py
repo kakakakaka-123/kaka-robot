@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Header, HTTPException, status
+from json import JSONDecodeError
+
+from fastapi import APIRouter, Header, HTTPException, Request, status
+from pydantic import ValidationError
 
 from kaka_core.chat.service import generate_chat_response, observe_message
 from kaka_core.config.settings import get_settings
@@ -52,8 +55,8 @@ async def observe(event: MessageEvent) -> KakaResponse:
 
 
 @router.post("/v1/notifications", response_model=NotificationResult)
-def notify(
-    request: NotificationRequest,
+async def notify(
+    request: Request,
     authorization: str | None = Header(default=None),
 ) -> NotificationResult:
     """Receive a proactive external notification and forward it to the adapter."""
@@ -61,6 +64,15 @@ def notify(
     _require_notification_token(authorization)
     settings = get_settings()
     try:
-        return deliver_notification(request, settings.notifications)
+        payload = await request.json()
+        notification = NotificationRequest.model_validate(payload)
+    except (JSONDecodeError, ValidationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="invalid notification request",
+        ) from exc
+
+    try:
+        return deliver_notification(notification, settings.notifications)
     except NotificationDeliveryError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

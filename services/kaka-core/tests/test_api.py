@@ -119,6 +119,60 @@ def test_notification_rejects_missing_token(monkeypatch, tmp_path) -> None:
     get_settings.cache_clear()
 
 
+def test_notification_rejects_missing_token_before_body_validation(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'notification-auth-malformed.sqlite3'}")
+    monkeypatch.setenv("PLUGIN_NOTIFICATION_TOKEN", "secret-token")
+    monkeypatch.setenv("QQ_ADAPTER_SEND_BASE_URL", "http://qq-adapter.local")
+    get_settings.cache_clear()
+
+    response = client.post(
+        "/v1/notifications",
+        content=b"{not-json",
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 401
+    get_settings.cache_clear()
+
+
+def test_notification_rejects_wrong_token_before_body_validation(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'notification-wrong-auth-malformed.sqlite3'}")
+    monkeypatch.setenv("PLUGIN_NOTIFICATION_TOKEN", "secret-token")
+    monkeypatch.setenv("QQ_ADAPTER_SEND_BASE_URL", "http://qq-adapter.local")
+    get_settings.cache_clear()
+
+    response = client.post(
+        "/v1/notifications",
+        content=b"{not-json",
+        headers={
+            "Authorization": "Bearer wrong-token",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert response.status_code == 401
+    get_settings.cache_clear()
+
+
+def test_notification_accepts_valid_token_before_rejecting_malformed_body(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'notification-valid-auth-malformed.sqlite3'}")
+    monkeypatch.setenv("PLUGIN_NOTIFICATION_TOKEN", "secret-token")
+    monkeypatch.setenv("QQ_ADAPTER_SEND_BASE_URL", "http://qq-adapter.local")
+    get_settings.cache_clear()
+
+    response = client.post(
+        "/v1/notifications",
+        content=b"{not-json",
+        headers={
+            "Authorization": "Bearer secret-token",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert response.status_code == 422
+    get_settings.cache_clear()
+
+
 def test_notification_returns_503_when_token_unconfigured(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'notification-unconfigured.sqlite3'}")
     monkeypatch.setenv("PLUGIN_NOTIFICATION_TOKEN", "")
@@ -135,6 +189,25 @@ def test_notification_returns_503_when_token_unconfigured(monkeypatch, tmp_path)
         "/v1/notifications",
         headers={"Authorization": "Bearer secret-token"},
         json=request,
+    )
+
+    assert response.status_code == 503
+    get_settings.cache_clear()
+
+
+def test_notification_returns_503_when_token_unconfigured_before_body_validation(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'notification-unconfigured-malformed.sqlite3'}")
+    monkeypatch.setenv("PLUGIN_NOTIFICATION_TOKEN", "")
+    monkeypatch.setenv("QQ_ADAPTER_SEND_BASE_URL", "http://qq-adapter.local")
+    get_settings.cache_clear()
+
+    response = client.post(
+        "/v1/notifications",
+        content=b"{not-json",
+        headers={
+            "Authorization": "Bearer secret-token",
+            "Content-Type": "application/json",
+        },
     )
 
     assert response.status_code == 503
