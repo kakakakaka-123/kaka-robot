@@ -8,6 +8,8 @@ from nonebot.adapters.onebot.v11 import (
     PrivateMessageEvent,
 )
 
+from kaka_protocol import NotificationRequest
+from qq_adapter.api import send_notification_request as _send_notification_request
 from qq_adapter.actions import QQSendTextAction
 from qq_adapter.config import get_settings
 from qq_adapter.core_client import KakaCoreClient, KakaCoreClientError
@@ -223,3 +225,9 @@ async def _send_text_action(
         return
 
     await bot.send(event, action.text, at_sender=False)
+
+
+async def send_notification_request(bot: Bot, request: NotificationRequest) -> None:
+    """Send a proactive notification without relying on an inbound QQ event."""
+
+    await _send_notification_request(bot, request)

@@ -23,6 +23,7 @@ class QQAdapterSettings:
 
     core_base_url: str
     request_timeout_seconds: float
+    send_token: str = ""
 
 
 @lru_cache
@@ -33,4 +34,5 @@ def get_settings() -> QQAdapterSettings:
     return QQAdapterSettings(
         core_base_url=os.getenv("KAKA_CORE_BASE_URL", "http://127.0.0.1:8001").rstrip("/"),
         request_timeout_seconds=float(os.getenv("QQ_ADAPTER_REQUEST_TIMEOUT", "60")),
+        send_token=os.getenv("QQ_ADAPTER_SEND_TOKEN", "").strip(),
     )
