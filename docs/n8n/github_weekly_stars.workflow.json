@@ -1,0 +1,648 @@
+{
+  "name": "kaka-github-weekly-stars",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "kaka/github_weekly_stars",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "WebhookTrigger",
+      "name": "Command Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "kaka-github-weekly-stars-command"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "ScheduleTrigger",
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst day = now.getDay();\nconst daysSinceMonday = (day + 6) % 7;\nconst thisMonday = new Date(now);\nthisMonday.setDate(now.getDate() - daysSinceMonday);\nthisMonday.setHours(0, 0, 0, 0);\nconst lastMonday = new Date(thisMonday);\nlastMonday.setDate(thisMonday.getDate() - 7);\nconst lastSunday = new Date(thisMonday);\nlastSunday.setDate(thisMonday.getDate() - 1);\nconst pad = (value) => String(value).padStart(2, '0');\nconst fmt = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;\nconst parsedMinStars = Number($env.GITHUB_WEEKLY_MIN_STARS || 50);\nconst minStars = Number.isFinite(parsedMinStars) ? parsedMinStars : 50;\nconst parsedLimit = Number($env.GITHUB_WEEKLY_LIMIT || 10);\nconst limit = Math.min(Math.max(Number.isFinite(parsedLimit) ? parsedLimit : 10, 1), 100);\nconst language = ($env.GITHUB_WEEKLY_LANGUAGE || '').trim();\nconst languageQuery = language ? ` language:${language}` : '';\nconst q = `created:${fmt(lastMonday)}..${fmt(lastSunday)} fork:false archived:false stars:>${minStars}${languageQuery}`;\nreturn [{\n  json: {\n    startDate: fmt(lastMonday),\n    endDate: fmt(lastSunday),\n    minStars,\n    limit,\n    language,\n    q,\n    trigger_type: 'command',\n    input: $json.input || $json.command_text || '',\n  },\n}];"
+      },
+      "id": "BuildCommandQuery",
+      "name": "Build Command GitHub Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst day = now.getDay();\nconst daysSinceMonday = (day + 6) % 7;\nconst thisMonday = new Date(now);\nthisMonday.setDate(now.getDate() - daysSinceMonday);\nthisMonday.setHours(0, 0, 0, 0);\nconst lastMonday = new Date(thisMonday);\nlastMonday.setDate(thisMonday.getDate() - 7);\nconst lastSunday = new Date(thisMonday);\nlastSunday.setDate(thisMonday.getDate() - 1);\nconst pad = (value) => String(value).padStart(2, '0');\nconst fmt = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;\nconst parsedMinStars = Number($env.GITHUB_WEEKLY_MIN_STARS || 50);\nconst minStars = Number.isFinite(parsedMinStars) ? parsedMinStars : 50;\nconst parsedLimit = Number($env.GITHUB_WEEKLY_LIMIT || 10);\nconst limit = Math.min(Math.max(Number.isFinite(parsedLimit) ? parsedLimit : 10, 1), 100);\nconst language = ($env.GITHUB_WEEKLY_LANGUAGE || '').trim();\nconst languageQuery = language ? ` language:${language}` : '';\nconst q = `created:${fmt(lastMonday)}..${fmt(lastSunday)} fork:false archived:false stars:>${minStars}${languageQuery}`;\nreturn [{\n  json: {\n    startDate: fmt(lastMonday),\n    endDate: fmt(lastSunday),\n    minStars,\n    limit,\n    language,\n    q,\n    trigger_type: 'schedule',\n    input: '',\n  },\n}];"
+      },
+      "id": "BuildScheduleQuery",
+      "name": "Build Schedule GitHub Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "HasGithubToken",
+              "leftValue": "={{($env.GITHUB_TOKEN || '').trim()}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "CommandHasGithubToken",
+      "name": "Command Has GitHub Token?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "HasGithubToken",
+              "leftValue": "={{($env.GITHUB_TOKEN || '').trim()}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ScheduleHasGithubToken",
+      "name": "Schedule Has GitHub Token?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{$json.q}}"
+            },
+            {
+              "name": "sort",
+              "value": "stars"
+            },
+            {
+              "name": "order",
+              "value": "desc"
+            },
+            {
+              "name": "per_page",
+              "value": "={{$json.limit}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env.GITHUB_TOKEN || '').trim()}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "CommandSearchAuthenticated",
+      "name": "Command Search Repositories (Token)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        820,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{$json.q}}"
+            },
+            {
+              "name": "sort",
+              "value": "stars"
+            },
+            {
+              "name": "order",
+              "value": "desc"
+            },
+            {
+              "name": "per_page",
+              "value": "={{$json.limit}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "CommandSearchAnonymous",
+      "name": "Command Search Repositories (Anonymous)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        820,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{$json.q}}"
+            },
+            {
+              "name": "sort",
+              "value": "stars"
+            },
+            {
+              "name": "order",
+              "value": "desc"
+            },
+            {
+              "name": "per_page",
+              "value": "={{$json.limit}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env.GITHUB_TOKEN || '').trim()}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ScheduleSearchAuthenticated",
+      "name": "Schedule Search Repositories (Token)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        820,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{$json.q}}"
+            },
+            {
+              "name": "sort",
+              "value": "stars"
+            },
+            {
+              "name": "order",
+              "value": "desc"
+            },
+            {
+              "name": "per_page",
+              "value": "={{$json.limit}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ScheduleSearchAnonymous",
+      "name": "Schedule Search Repositories (Anonymous)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        820,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const source = $input.first().json;\nconst query = $('Build Command GitHub Query').first().json;\nconst repos = (source.items || []).map((repo) => ({\n  full_name: repo.full_name,\n  html_url: repo.html_url,\n  description: repo.description,\n  stargazers_count: repo.stargazers_count,\n  language: repo.language,\n  created_at: repo.created_at,\n  owner: repo.owner ? { login: repo.owner.login, html_url: repo.owner.html_url } : undefined,\n  topics: repo.topics || [],\n}));\nconst lines = [`上周 GitHub 高星新项目 Top ${repos.length}（${query.startDate} 至 ${query.endDate}）`];\nlines.push(`筛选：stars > ${query.minStars}${query.language ? `，语言：${query.language}` : ''}`);\nif (!repos.length) {\n  lines.push('没有找到符合条件的新项目，可以降低 GITHUB_WEEKLY_MIN_STARS 或清空 GITHUB_WEEKLY_LANGUAGE。');\n} else {\n  repos.forEach((repo, index) => {\n    const stars = Number(repo.stargazers_count || 0).toLocaleString('en-US');\n    const lang = repo.language || 'Unknown';\n    const desc = repo.description || '暂无描述';\n    lines.push('');\n    lines.push(`${index + 1}. ${repo.full_name} - ${stars} stars`);\n    lines.push(`   ${desc}`);\n    lines.push(`   语言：${lang}`);\n    lines.push(`   ${repo.html_url}`);\n  });\n}\nreturn [{\n  json: {\n    text: lines.join('\\n'),\n    data: {\n      startDate: query.startDate,\n      endDate: query.endDate,\n      minStars: query.minStars,\n      limit: query.limit,\n      language: query.language,\n      count: repos.length,\n      totalCount: source.total_count || 0,\n      incompleteResults: Boolean(source.incomplete_results),\n      repos,\n    },\n    metadata: {\n      source: 'github_weekly_stars',\n      trigger_type: query.trigger_type,\n      q: query.q,\n      generated_at: new Date().toISOString(),\n    },\n  },\n}];"
+      },
+      "id": "FormatCommandDigest",
+      "name": "Format Command Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const source = $input.first().json;\nconst query = $('Build Schedule GitHub Query').first().json;\nconst repos = (source.items || []).map((repo) => ({\n  full_name: repo.full_name,\n  html_url: repo.html_url,\n  description: repo.description,\n  stargazers_count: repo.stargazers_count,\n  language: repo.language,\n  created_at: repo.created_at,\n  owner: repo.owner ? { login: repo.owner.login, html_url: repo.owner.html_url } : undefined,\n  topics: repo.topics || [],\n}));\nconst lines = [`上周 GitHub 高星新项目 Top ${repos.length}（${query.startDate} 至 ${query.endDate}）`];\nlines.push(`筛选：stars > ${query.minStars}${query.language ? `，语言：${query.language}` : ''}`);\nif (!repos.length) {\n  lines.push('没有找到符合条件的新项目，可以降低 GITHUB_WEEKLY_MIN_STARS 或清空 GITHUB_WEEKLY_LANGUAGE。');\n} else {\n  repos.forEach((repo, index) => {\n    const stars = Number(repo.stargazers_count || 0).toLocaleString('en-US');\n    const lang = repo.language || 'Unknown';\n    const desc = repo.description || '暂无描述';\n    lines.push('');\n    lines.push(`${index + 1}. ${repo.full_name} - ${stars} stars`);\n    lines.push(`   ${desc}`);\n    lines.push(`   语言：${lang}`);\n    lines.push(`   ${repo.html_url}`);\n  });\n}\nreturn [{\n  json: {\n    text: lines.join('\\n'),\n    data: {\n      startDate: query.startDate,\n      endDate: query.endDate,\n      minStars: query.minStars,\n      limit: query.limit,\n      language: query.language,\n      count: repos.length,\n      totalCount: source.total_count || 0,\n      incompleteResults: Boolean(source.incomplete_results),\n      repos,\n    },\n    metadata: {\n      source: 'github_weekly_stars',\n      trigger_type: query.trigger_type,\n      q: query.q,\n      generated_at: new Date().toISOString(),\n    },\n  },\n}];"
+      },
+      "id": "FormatScheduleDigest",
+      "name": "Format Schedule Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "IsCommand",
+              "leftValue": "={{$json.metadata.trigger_type}}",
+              "rightValue": "command",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "RouteCommandDigest",
+      "name": "Route Command Digest",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "IsSchedule",
+              "leftValue": "={{$json.metadata.trigger_type}}",
+              "rightValue": "schedule",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "RouteScheduleDigest",
+      "name": "Route Schedule Digest",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {}
+      },
+      "id": "RespondToCommand",
+      "name": "Respond to Command",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1640,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.KAKA_CORE_BASE_URL || 'http://127.0.0.1:8001').replace(/\\/$/, '') + '/v1/notifications'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + $env.PLUGIN_NOTIFICATION_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { target: { platform: 'qq', scene_type: $env.GITHUB_WEEKLY_TARGET_SCENE_TYPE || 'group', scene_id: $env.GITHUB_WEEKLY_TARGET_SCENE_ID }, content: { type: 'text', text: $json.text }, source: 'n8n:github_weekly_stars', idempotency_key: `github-weekly-stars:${$json.data.startDate}:${$env.GITHUB_WEEKLY_TARGET_SCENE_TYPE || 'group'}:${$env.GITHUB_WEEKLY_TARGET_SCENE_ID}`, metadata: { workflow: 'github_weekly_stars', startDate: $json.data.startDate, endDate: $json.data.endDate, q: $json.metadata.q } } }}"
+      },
+      "id": "PostScheduledDigestToKaka",
+      "name": "Post Scheduled Digest to Kaka",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1640,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "Command Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Command GitHub Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Build Schedule GitHub Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Command GitHub Query": {
+      "main": [
+        [
+          {
+            "node": "Command Has GitHub Token?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Schedule GitHub Query": {
+      "main": [
+        [
+          {
+            "node": "Schedule Has GitHub Token?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Has GitHub Token?": {
+      "main": [
+        [
+          {
+            "node": "Command Search Repositories (Token)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Command Search Repositories (Anonymous)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Has GitHub Token?": {
+      "main": [
+        [
+          {
+            "node": "Schedule Search Repositories (Token)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Schedule Search Repositories (Anonymous)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Search Repositories (Token)": {
+      "main": [
+        [
+          {
+            "node": "Format Command Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Search Repositories (Anonymous)": {
+      "main": [
+        [
+          {
+            "node": "Format Command Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Search Repositories (Token)": {
+      "main": [
+        [
+          {
+            "node": "Format Schedule Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Search Repositories (Anonymous)": {
+      "main": [
+        [
+          {
+            "node": "Format Schedule Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Command Digest": {
+      "main": [
+        [
+          {
+            "node": "Route Command Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Schedule Digest": {
+      "main": [
+        [
+          {
+            "node": "Route Schedule Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Command Digest": {
+      "main": [
+        [
+          {
+            "node": "Respond to Command",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Route Schedule Digest": {
+      "main": [
+        [
+          {
+            "node": "Post Scheduled Digest to Kaka",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2026-06-14T00:00:00.000Z",
+  "versionId": "github-weekly-stars-docs-v1"
+}
