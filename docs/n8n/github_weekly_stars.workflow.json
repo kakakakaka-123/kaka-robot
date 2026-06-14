@@ -3,6 +3,7 @@
   "nodes": [
     {
       "parameters": {
+        "httpMethod": "POST",
         "path": "kaka/github_weekly_stars",
         "responseMode": "responseNode",
         "options": {}

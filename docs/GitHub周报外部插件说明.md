@@ -84,6 +84,7 @@ http://127.0.0.1:8081/proactive/v1/send
 ```env
 PLUGIN_SYSTEM_ENABLED=true
 PLUGIN_N8N_WEBHOOK_BASE_URL=http://127.0.0.1:5678/webhook/kaka
+KAKA_CORE_BASE_URL=http://127.0.0.1:8001
 PLUGIN_NOTIFICATION_TOKEN=本地随机密钥
 PLUGIN_NOTIFICATION_ADAPTER_TIMEOUT=30
 QQ_ADAPTER_SEND_BASE_URL=http://127.0.0.1:8081/proactive
@@ -98,6 +99,8 @@ GITHUB_WEEKLY_TARGET_SCENE_ID=QQ群号
 
 `GITHUB_TOKEN` 可为空。为空时工作流走匿名 GitHub Search 请求，不会发送空的 `Authorization: Bearer ` 请求头；配置后会发送 `Authorization: Bearer <GITHUB_TOKEN>`，搜索限额更稳定。
 
+`KAKA_CORE_BASE_URL` 用于定时推送分支调用 kaka-core。未配置时，工作流默认使用 `http://127.0.0.1:8001`，适合 n8n 和 kaka-core 都在本机运行的开发环境。如果 n8n 运行在 Docker、另一台机器或服务器上，需要把它改成 n8n 能访问到的 kaka-core 地址。
+
 ## n8n 导入
 
 在 n8n 中选择导入工作流 JSON：
@@ -106,9 +109,11 @@ GITHUB_WEEKLY_TARGET_SCENE_ID=QQ群号
 docs/n8n/github_weekly_stars.workflow.json
 ```
 
+导入后需要在 n8n 里启用或激活这个工作流。未激活时，生产 webhook 不会接收卡咔的 POST 请求，定时 Schedule 也不会运行。
+
 导入后检查：
 
-- `Command Webhook` 的 path 是 `kaka/github_weekly_stars`。
+- `Command Webhook` 的 method 是 `POST`，path 是 `kaka/github_weekly_stars`。
 - `Weekly Schedule` 是每周一 09:00。
 - `Command Has GitHub Token?` 和 `Schedule Has GitHub Token?` 会把 GitHub 请求分为带 token 和匿名两种路径。
 - `Route Command Digest` 只连接 `Respond to Command`。
