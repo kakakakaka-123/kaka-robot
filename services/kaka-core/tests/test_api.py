@@ -1,4 +1,5 @@
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from kaka_core.api.app import create_app
@@ -7,6 +8,40 @@ from kaka_protocol import MessageContent, MessageEvent, Platform, SceneType
 
 
 client = TestClient(create_app())
+
+
+@pytest.fixture(autouse=True)
+def clear_settings_cache() -> None:
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()
+
+
+def _notification_request() -> dict[str, object]:
+    return {
+        "target": {"platform": "qq", "scene_type": "group", "scene_id": "20002"},
+        "content": {"type": "text", "text": "GitHub 鍛ㄦ姤"},
+        "source": "n8n:github_weekly_stars",
+    }
+
+
+def _configure_notification_env(monkeypatch, tmp_path, db_name: str) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / db_name}")
+    monkeypatch.setenv("PLUGIN_NOTIFICATION_TOKEN", "secret-token")
+    monkeypatch.setenv("QQ_ADAPTER_SEND_BASE_URL", "http://qq-adapter.local")
+    get_settings.cache_clear()
+
+
+def _patch_qq_adapter_post(monkeypatch, handler) -> None:
+    original_post = httpx.Client.post
+
+    def fake_post(self: httpx.Client, url: str, **kwargs: object) -> httpx.Response:
+        if url == "/v1/notifications":
+            return original_post(self, url, **kwargs)
+        return handler(self, url, **kwargs)
+
+    monkeypatch.setattr(httpx.Client, "post", fake_post)
 
 
 def test_health_check() -> None:
@@ -175,3 +210,57 @@ def test_notification_forwards_to_qq_adapter(monkeypatch, tmp_path) -> None:
     assert captured["headers"] == {"Authorization": "Bearer qq-send-token"}
     assert captured["json"] == request
     get_settings.cache_clear()
+
+
+def test_notification_maps_adapter_timeout_to_504(monkeypatch, tmp_path) -> None:
+    _configure_notification_env(monkeypatch, tmp_path, "notification-timeout.sqlite3")
+
+    def fake_adapter_post(self: httpx.Client, url: str, **kwargs: object) -> httpx.Response:
+        raise httpx.TimeoutException("adapter timed out")
+
+    _patch_qq_adapter_post(monkeypatch, fake_adapter_post)
+
+    response = client.post(
+        "/v1/notifications",
+        headers={"Authorization": "Bearer secret-token"},
+        json=_notification_request(),
+    )
+
+    assert response.status_code == 504
+    assert "QQ adapter request timed out" in response.json()["detail"]
+
+
+def test_notification_maps_malformed_adapter_success_to_502(monkeypatch, tmp_path) -> None:
+    _configure_notification_env(monkeypatch, tmp_path, "notification-malformed.sqlite3")
+
+    def fake_adapter_post(self: httpx.Client, url: str, **kwargs: object) -> httpx.Response:
+        return httpx.Response(200, text="not-json")
+
+    _patch_qq_adapter_post(monkeypatch, fake_adapter_post)
+
+    response = client.post(
+        "/v1/notifications",
+        headers={"Authorization": "Bearer secret-token"},
+        json=_notification_request(),
+    )
+
+    assert response.status_code == 502
+    assert "invalid QQ adapter response" in response.json()["detail"]
+
+
+def test_notification_maps_adapter_5xx_to_502(monkeypatch, tmp_path) -> None:
+    _configure_notification_env(monkeypatch, tmp_path, "notification-5xx.sqlite3")
+
+    def fake_adapter_post(self: httpx.Client, url: str, **kwargs: object) -> httpx.Response:
+        return httpx.Response(503, text="adapter unavailable")
+
+    _patch_qq_adapter_post(monkeypatch, fake_adapter_post)
+
+    response = client.post(
+        "/v1/notifications",
+        headers={"Authorization": "Bearer secret-token"},
+        json=_notification_request(),
+    )
+
+    assert response.status_code == 502
+    assert "QQ adapter rejected notification: HTTP 503" in response.json()["detail"]
