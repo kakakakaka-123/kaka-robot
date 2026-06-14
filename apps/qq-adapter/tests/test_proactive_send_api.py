@@ -1,3 +1,6 @@
+from collections.abc import Iterator
+
+import pytest
 from fastapi.testclient import TestClient
 
 from kaka_protocol import (
@@ -10,6 +13,15 @@ from kaka_protocol import (
 )
 from qq_adapter.api import create_send_api
 from qq_adapter.config import get_settings
+
+
+@pytest.fixture(autouse=True)
+def clear_settings_cache() -> Iterator[None]:
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()
 
 
 class FakeBot:
@@ -44,7 +56,6 @@ def make_request(
 
 def test_send_api_rejects_missing_token(monkeypatch) -> None:
     monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
-    get_settings.cache_clear()
     fake_bot = FakeBot()
     client = TestClient(create_send_api(lambda: fake_bot))
 
@@ -52,12 +63,25 @@ def test_send_api_rejects_missing_token(monkeypatch) -> None:
 
     assert response.status_code == 401
     assert fake_bot.group_messages == []
-    get_settings.cache_clear()
+
+
+def test_send_api_rejects_wrong_token(monkeypatch) -> None:
+    monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
+    fake_bot = FakeBot()
+    client = TestClient(create_send_api(lambda: fake_bot))
+
+    response = client.post(
+        "/v1/send",
+        headers={"Authorization": "Bearer wrong-token"},
+        json=make_request().model_dump(mode="json"),
+    )
+
+    assert response.status_code == 401
+    assert fake_bot.group_messages == []
 
 
 def test_send_api_returns_503_when_token_unconfigured(monkeypatch) -> None:
     monkeypatch.delenv("QQ_ADAPTER_SEND_TOKEN", raising=False)
-    get_settings.cache_clear()
     fake_bot = FakeBot()
     client = TestClient(create_send_api(lambda: fake_bot))
 
@@ -65,12 +89,31 @@ def test_send_api_returns_503_when_token_unconfigured(monkeypatch) -> None:
 
     assert response.status_code == 503
     assert fake_bot.group_messages == []
-    get_settings.cache_clear()
+
+
+def test_send_api_returns_503_when_bot_unavailable(monkeypatch) -> None:
+    monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
+
+    def get_unavailable_bot() -> FakeBot:
+        raise RuntimeError("no OneBot connection is available")
+
+    client = TestClient(
+        create_send_api(get_unavailable_bot),
+        raise_server_exceptions=False,
+    )
+
+    response = client.post(
+        "/v1/send",
+        headers={"Authorization": "Bearer qq-send-token"},
+        json=make_request().model_dump(mode="json"),
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "no OneBot connection is available"
 
 
 def test_send_api_sends_group_text(monkeypatch) -> None:
     monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
-    get_settings.cache_clear()
     fake_bot = FakeBot()
     client = TestClient(create_send_api(lambda: fake_bot))
 
@@ -89,12 +132,10 @@ def test_send_api_sends_group_text(monkeypatch) -> None:
         "source": "n8n:github_weekly_stars",
     }
     assert fake_bot.group_messages == [(20002, "GitHub weekly stars")]
-    get_settings.cache_clear()
 
 
 def test_send_api_sends_private_text(monkeypatch) -> None:
     monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
-    get_settings.cache_clear()
     fake_bot = FakeBot()
     client = TestClient(create_send_api(lambda: fake_bot))
 
@@ -110,12 +151,10 @@ def test_send_api_sends_private_text(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["delivered"] is True
     assert fake_bot.private_messages == [(10001, "GitHub weekly stars")]
-    get_settings.cache_clear()
 
 
 def test_send_api_rejects_non_qq_platform(monkeypatch) -> None:
     monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
-    get_settings.cache_clear()
     fake_bot = FakeBot()
     client = TestClient(create_send_api(lambda: fake_bot))
 
@@ -127,12 +166,10 @@ def test_send_api_rejects_non_qq_platform(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert fake_bot.group_messages == []
-    get_settings.cache_clear()
 
 
 def test_send_api_rejects_empty_text(monkeypatch) -> None:
     monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
-    get_settings.cache_clear()
     fake_bot = FakeBot()
     client = TestClient(create_send_api(lambda: fake_bot))
 
@@ -144,12 +181,10 @@ def test_send_api_rejects_empty_text(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert fake_bot.group_messages == []
-    get_settings.cache_clear()
 
 
 def test_send_api_rejects_non_text_content(monkeypatch) -> None:
     monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
-    get_settings.cache_clear()
     fake_bot = FakeBot()
     client = TestClient(create_send_api(lambda: fake_bot))
     request = make_request()
@@ -163,4 +198,34 @@ def test_send_api_rejects_non_text_content(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert fake_bot.group_messages == []
-    get_settings.cache_clear()
+
+
+def test_send_api_rejects_unsupported_qq_scene_type(monkeypatch) -> None:
+    monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
+    fake_bot = FakeBot()
+    client = TestClient(create_send_api(lambda: fake_bot))
+
+    response = client.post(
+        "/v1/send",
+        headers={"Authorization": "Bearer qq-send-token"},
+        json=make_request(scene_type=SceneType.ROOM).model_dump(mode="json"),
+    )
+
+    assert response.status_code == 400
+    assert fake_bot.group_messages == []
+    assert fake_bot.private_messages == []
+
+
+def test_send_api_rejects_non_numeric_scene_id(monkeypatch) -> None:
+    monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
+    fake_bot = FakeBot()
+    client = TestClient(create_send_api(lambda: fake_bot))
+
+    response = client.post(
+        "/v1/send",
+        headers={"Authorization": "Bearer qq-send-token"},
+        json=make_request(scene_id="not-a-number").model_dump(mode="json"),
+    )
+
+    assert response.status_code == 400
+    assert fake_bot.group_messages == []
