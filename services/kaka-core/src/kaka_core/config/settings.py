@@ -177,6 +177,16 @@ class PluginSettings:
 
 
 @dataclass(frozen=True)
+class NotificationSettings:
+    """External proactive notification configuration."""
+
+    token: str
+    qq_adapter_send_base_url: str
+    qq_adapter_send_token: str
+    adapter_timeout_seconds: float
+
+
+@dataclass(frozen=True)
 class Settings:
     """卡咔核心服务总配置。"""
 
@@ -190,6 +200,7 @@ class Settings:
     persona: PersonaSettings
     admin: AdminSettings
     plugins: PluginSettings
+    notifications: NotificationSettings
 
 
 @lru_cache
@@ -268,5 +279,11 @@ def get_settings() -> Settings:
             ),
             n8n_webhook_base_url=os.getenv("PLUGIN_N8N_WEBHOOK_BASE_URL", "").rstrip("/"),
             n8n_webhook_timeout_seconds=_get_float("PLUGIN_N8N_WEBHOOK_TIMEOUT", 30.0),
+        ),
+        notifications=NotificationSettings(
+            token=os.getenv("PLUGIN_NOTIFICATION_TOKEN", "").strip(),
+            qq_adapter_send_base_url=os.getenv("QQ_ADAPTER_SEND_BASE_URL", "").rstrip("/"),
+            qq_adapter_send_token=os.getenv("QQ_ADAPTER_SEND_TOKEN", "").strip(),
+            adapter_timeout_seconds=_get_float("PLUGIN_NOTIFICATION_ADAPTER_TIMEOUT", 30.0),
         ),
     )

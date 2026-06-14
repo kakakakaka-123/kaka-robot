@@ -1,7 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException, status
 
 from kaka_core.chat.service import generate_chat_response, observe_message
-from kaka_protocol import KakaResponse, MessageEvent
+from kaka_core.config.settings import get_settings
+from kaka_core.notifications import NotificationDeliveryError, deliver_notification
+from kaka_protocol import KakaResponse, MessageEvent, NotificationRequest, NotificationResult
 
 router = APIRouter()
 
@@ -14,6 +16,21 @@ def health_check() -> dict[str, str]:
     """
 
     return {"status": "ok", "service": "kaka-core"}
+
+
+def _require_notification_token(authorization: str | None) -> None:
+    settings = get_settings()
+    token = settings.notifications.token
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="notification token is not configured",
+        )
+    if authorization != f"Bearer {token}":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid notification token",
+        )
 
 
 @router.post("/v1/chat", response_model=KakaResponse)
@@ -32,3 +49,18 @@ async def observe(event: MessageEvent) -> KakaResponse:
     """接收只观察不回复的统一消息事件。"""
 
     return observe_message(event)
+
+
+@router.post("/v1/notifications", response_model=NotificationResult)
+def notify(
+    request: NotificationRequest,
+    authorization: str | None = Header(default=None),
+) -> NotificationResult:
+    """Receive a proactive external notification and forward it to the adapter."""
+
+    _require_notification_token(authorization)
+    settings = get_settings()
+    try:
+        return deliver_notification(request, settings.notifications)
+    except NotificationDeliveryError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

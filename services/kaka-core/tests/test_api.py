@@ -1,3 +1,4 @@
+import httpx
 from fastapi.testclient import TestClient
 
 from kaka_core.api.app import create_app
@@ -62,4 +63,115 @@ def test_observe_accepts_message_event_and_does_not_reply(monkeypatch, tmp_path)
     assert data["should_reply"] is False
     assert data["actions"] == []
     assert data["metadata"]["reason"] == "observed"
+    get_settings.cache_clear()
+
+
+def test_notification_rejects_missing_token(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'notification-auth.sqlite3'}")
+    monkeypatch.setenv("PLUGIN_NOTIFICATION_TOKEN", "secret-token")
+    monkeypatch.setenv("QQ_ADAPTER_SEND_BASE_URL", "http://qq-adapter.local")
+    get_settings.cache_clear()
+
+    request = {
+        "target": {"platform": "qq", "scene_type": "group", "scene_id": "20002"},
+        "content": {"type": "text", "text": "GitHub 周报"},
+        "source": "n8n:github_weekly_stars",
+    }
+
+    response = client.post("/v1/notifications", json=request)
+
+    assert response.status_code == 401
+    get_settings.cache_clear()
+
+
+def test_notification_returns_503_when_token_unconfigured(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'notification-unconfigured.sqlite3'}")
+    monkeypatch.setenv("PLUGIN_NOTIFICATION_TOKEN", "")
+    monkeypatch.setenv("QQ_ADAPTER_SEND_BASE_URL", "http://qq-adapter.local")
+    get_settings.cache_clear()
+
+    request = {
+        "target": {"platform": "qq", "scene_type": "group", "scene_id": "20002"},
+        "content": {"type": "text", "text": "GitHub 周报"},
+        "source": "n8n:github_weekly_stars",
+    }
+
+    response = client.post(
+        "/v1/notifications",
+        headers={"Authorization": "Bearer secret-token"},
+        json=request,
+    )
+
+    assert response.status_code == 503
+    get_settings.cache_clear()
+
+
+def test_notification_rejects_unsupported_platform(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'notification-platform.sqlite3'}")
+    monkeypatch.setenv("PLUGIN_NOTIFICATION_TOKEN", "secret-token")
+    monkeypatch.setenv("QQ_ADAPTER_SEND_BASE_URL", "http://qq-adapter.local")
+    get_settings.cache_clear()
+
+    request = {
+        "target": {"platform": "desktop", "scene_type": "private", "scene_id": "desktop-local"},
+        "content": {"type": "text", "text": "GitHub 周报"},
+        "source": "n8n:github_weekly_stars",
+    }
+
+    response = client.post(
+        "/v1/notifications",
+        headers={"Authorization": "Bearer secret-token"},
+        json=request,
+    )
+
+    assert response.status_code == 400
+    assert "unsupported notification platform" in response.json()["detail"]
+    get_settings.cache_clear()
+
+
+def test_notification_forwards_to_qq_adapter(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'notification-forward.sqlite3'}")
+    monkeypatch.setenv("PLUGIN_NOTIFICATION_TOKEN", "secret-token")
+    monkeypatch.setenv("QQ_ADAPTER_SEND_BASE_URL", "http://qq-adapter.local")
+    monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
+    get_settings.cache_clear()
+    captured: dict[str, object] = {}
+    original_post = httpx.Client.post
+
+    def fake_post(self: httpx.Client, url: str, **kwargs: object) -> httpx.Response:
+        if url == "/v1/notifications":
+            return original_post(self, url, **kwargs)
+        captured["url"] = url
+        captured["headers"] = kwargs.get("headers")
+        captured["json"] = kwargs.get("json")
+        return httpx.Response(
+            200,
+            json={
+                "accepted": True,
+                "delivered": True,
+                "target": {"platform": "qq", "scene_type": "group", "scene_id": "20002"},
+                "metadata": {"adapter": "qq"},
+            },
+        )
+
+    monkeypatch.setattr(httpx.Client, "post", fake_post)
+
+    request = {
+        "target": {"platform": "qq", "scene_type": "group", "scene_id": "20002"},
+        "content": {"type": "text", "text": "GitHub 周报"},
+        "source": "n8n:github_weekly_stars",
+        "idempotency_key": "github-weekly-stars:2026-06-08:qq:group:20002",
+    }
+
+    response = client.post(
+        "/v1/notifications",
+        headers={"Authorization": "Bearer secret-token"},
+        json=request,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["delivered"] is True
+    assert captured["url"] == "http://qq-adapter.local/v1/send"
+    assert captured["headers"] == {"Authorization": "Bearer qq-send-token"}
+    assert captured["json"] == request
     get_settings.cache_clear()
