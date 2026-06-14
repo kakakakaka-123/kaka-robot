@@ -4,6 +4,9 @@ from kaka_protocol import (
     KakaResponse,
     MessageContent,
     MessageEvent,
+    NotificationRequest,
+    NotificationResult,
+    NotificationTarget,
     Platform,
     ResponseAction,
     SceneType,
@@ -72,3 +75,46 @@ def test_response_action_noop_keeps_reason() -> None:
 
     assert action.type == ActionType.NOOP
     assert action.metadata["reason"] == "cooldown"
+
+
+def test_notification_request_can_be_serialized() -> None:
+    request = NotificationRequest(
+        target=NotificationTarget(
+            platform=Platform.QQ,
+            scene_type=SceneType.GROUP,
+            scene_id="20002",
+        ),
+        content=MessageContent.text_message("GitHub 周报"),
+        source="n8n:github_weekly_stars",
+        idempotency_key="github-weekly-stars:2026-06-08:qq:group:20002",
+    )
+
+    data = request.model_dump(mode="json")
+
+    assert data["target"]["platform"] == "qq"
+    assert data["target"]["scene_type"] == "group"
+    assert data["target"]["scene_id"] == "20002"
+    assert data["content"]["type"] == "text"
+    assert data["content"]["text"] == "GitHub 周报"
+    assert data["source"] == "n8n:github_weekly_stars"
+    assert data["idempotency_key"] == "github-weekly-stars:2026-06-08:qq:group:20002"
+
+
+def test_notification_result_can_be_serialized() -> None:
+    result = NotificationResult(
+        accepted=True,
+        delivered=True,
+        target=NotificationTarget(
+            platform=Platform.QQ,
+            scene_type=SceneType.GROUP,
+            scene_id="20002",
+        ),
+        metadata={"adapter": "qq"},
+    )
+
+    data = result.model_dump(mode="json")
+
+    assert data["accepted"] is True
+    assert data["delivered"] is True
+    assert data["target"]["platform"] == "qq"
+    assert data["metadata"]["adapter"] == "qq"

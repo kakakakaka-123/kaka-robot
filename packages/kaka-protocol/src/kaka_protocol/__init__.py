@@ -9,6 +9,7 @@
 
 from kaka_protocol.enums import ActionType, ContentType, Platform, SceneType
 from kaka_protocol.messages import MessageContent, MessageEvent
+from kaka_protocol.notifications import NotificationRequest, NotificationResult, NotificationTarget
 from kaka_protocol.responses import KakaResponse, ResponseAction
 
 __all__ = [
@@ -17,6 +18,9 @@ __all__ = [
     "KakaResponse",
     "MessageContent",
     "MessageEvent",
+    "NotificationRequest",
+    "NotificationResult",
+    "NotificationTarget",
     "Platform",
     "ResponseAction",
     "SceneType",
