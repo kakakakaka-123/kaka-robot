@@ -13,6 +13,7 @@ from kaka_protocol import (
 )
 from qq_adapter.api import create_send_api
 from qq_adapter.config import get_settings
+from qq_adapter.sender import send_notification_request
 
 
 @pytest.fixture(autouse=True)
@@ -298,3 +299,12 @@ def test_send_api_rejects_non_numeric_scene_id(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert fake_bot.group_messages == []
+
+
+@pytest.mark.anyio
+async def test_sender_sends_group_text_without_api_dependency() -> None:
+    fake_bot = FakeBot()
+
+    await send_notification_request(fake_bot, make_request())
+
+    assert fake_bot.group_messages == [(20002, "GitHub weekly stars")]

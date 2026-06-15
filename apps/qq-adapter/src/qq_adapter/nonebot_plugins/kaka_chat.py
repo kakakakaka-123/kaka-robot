@@ -9,11 +9,11 @@ from nonebot.adapters.onebot.v11 import (
 )
 
 from kaka_protocol import NotificationRequest
-from qq_adapter.api import send_notification_request as _send_notification_request
 from qq_adapter.actions import QQSendTextAction
 from qq_adapter.config import get_settings
 from qq_adapter.core_client import KakaCoreClient, KakaCoreClientError
 from qq_adapter.pipeline import handle_onebot_text_event
+from qq_adapter.sender import send_notification_request as _send_notification_request
 from qq_adapter.trigger import should_handle_group_plaintext
 
 matcher = on_message(priority=50, block=False)

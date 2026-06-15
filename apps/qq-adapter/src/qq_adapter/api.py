@@ -5,8 +5,9 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from pydantic import ValidationError
 
-from kaka_protocol import ContentType, NotificationRequest, NotificationResult, Platform, SceneType
+from kaka_protocol import NotificationRequest, NotificationResult, Platform
 from qq_adapter.config import get_settings
+from qq_adapter.sender import send_notification_request
 
 
 def _require_send_token(authorization: str | None) -> None:
@@ -21,24 +22,6 @@ def _require_send_token(authorization: str | None) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid QQ adapter send token",
         )
-
-
-async def send_notification_request(bot: Any, request: NotificationRequest) -> None:
-    """Send a proactive notification without relying on an inbound QQ event."""
-
-    text = request.content.text
-    if request.content.type != ContentType.TEXT or not text:
-        raise ValueError("only non-empty text notifications are supported")
-
-    if request.target.scene_type == SceneType.GROUP:
-        await bot.send_group_msg(group_id=int(request.target.scene_id), message=text)
-        return
-
-    if request.target.scene_type == SceneType.PRIVATE:
-        await bot.send_private_msg(user_id=int(request.target.scene_id), message=text)
-        return
-
-    raise ValueError(f"unsupported QQ notification scene type: {request.target.scene_type}")
 
 
 def create_send_api(get_bot: Callable[[], Any]) -> FastAPI:
