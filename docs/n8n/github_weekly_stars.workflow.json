@@ -1,0 +1,653 @@
+{
+  "name": "Kaka GitHub Project Radar",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kaka/github_weekly_stars",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "WebhookTrigger",
+      "name": "Command Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "kaka-github-project-radar-command"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "ScheduleTrigger",
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const zh = {\n  \"mature\": \"成熟活跃项目\",\n  \"potential\": \"潜力项目\",\n  \"growthCandidates\": \"增长候选项目\",\n  \"noDesc\": \"暂无描述\",\n  \"noRepos\": \"没有找到符合条件的项目。\",\n  \"language\": \"语言：\",\n  \"updated\": \"最近更新：\",\n  \"growthTitle\": \"三、增长最快项目\",\n  \"syntheticSuffix\": \"（测试数据，真实增长榜将在下次周报生成）\",\n  \"noRealGrowth\": \"暂未计算出正增长项目。\",\n  \"noGrowthCandidates\": \"没有增长候选项目，可降低 GITHUB_RADAR_GROWTH_MIN_STARS。\",\n  \"growthSyntheticLabel\": \" / 本周（测试）\",\n  \"growthRealLabel\": \" / 本周\",\n  \"currentStars\": \"当前 stars：\",\n  \"title\": \"本周 GitHub 项目雷达\",\n  \"filter\": \"筛选：非 fork、未归档、最近\",\n  \"filterTail\": \"天内更新；不限定语言或方向。\",\n  \"matureSection\": \"一、成熟活跃项目\",\n  \"potentialSection\": \"二、潜力项目\"\n};\nconst inputJson = $json;\nreturn (function buildRadarQueries(triggerType, inputJson) {\n  const now = new Date();\n  const pad = (value) => String(value).padStart(2, '0');\n  const fmt = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;\n  const boundedInt = (value, fallback, min, max) => {\n    const parsed = Number(value);\n    if (!Number.isFinite(parsed)) return fallback;\n    return Math.min(Math.max(Math.trunc(parsed), min), max);\n  };\n\n  const day = now.getDay();\n  const daysSinceMonday = (day + 6) % 7;\n  const thisMonday = new Date(now);\n  thisMonday.setDate(now.getDate() - daysSinceMonday);\n  thisMonday.setHours(0, 0, 0, 0);\n  const activeSinceDate = new Date(now);\n\n  const sectionLimit = boundedInt($env.GITHUB_RADAR_SECTION_LIMIT || $env.GITHUB_WEEKLY_LIMIT || 5, 5, 1, 10);\n  const activeDays = boundedInt($env.GITHUB_RADAR_ACTIVE_DAYS || 30, 30, 1, 365);\n  const matureMinStars = boundedInt($env.GITHUB_RADAR_MATURE_MIN_STARS || 10000, 10000, 1, 100000000);\n  const potentialMinStars = boundedInt($env.GITHUB_RADAR_POTENTIAL_MIN_STARS || 500, 500, 1, 100000000);\n  const potentialMaxStars = boundedInt($env.GITHUB_RADAR_POTENTIAL_MAX_STARS || 10000, 10000, potentialMinStars, 100000000);\n  const growthMinStars = boundedInt($env.GITHUB_RADAR_GROWTH_MIN_STARS || 500, 500, 1, 100000000);\n  const growthCandidateLimit = boundedInt($env.GITHUB_RADAR_GROWTH_CANDIDATE_LIMIT || 50, 50, sectionLimit, 100);\n\n  activeSinceDate.setDate(now.getDate() - activeDays);\n  const activeSince = fmt(activeSinceDate);\n  const weekKey = fmt(thisMonday);\n  const baseQuery = `fork:false archived:false pushed:>${activeSince}`;\n\n  const common = {\n    trigger_type: triggerType,\n    input: inputJson.input || inputJson.command_text || '',\n    reportDate: fmt(now),\n    weekKey,\n    activeSince,\n    activeDays,\n    sectionLimit,\n    matureMinStars,\n    potentialMinStars,\n    potentialMaxStars,\n    growthMinStars,\n    growthCandidateLimit,\n  };\n\n  const queries = [\n    {\n      section: 'mature',\n      sectionTitle: zh.mature,\n      q: `stars:>${matureMinStars} ${baseQuery}`,\n      sort: 'stars',\n      order: 'desc',\n      per_page: sectionLimit,\n    },\n    {\n      section: 'potential',\n      sectionTitle: zh.potential,\n      q: `stars:${potentialMinStars}..${potentialMaxStars} ${baseQuery}`,\n      sort: 'stars',\n      order: 'desc',\n      per_page: sectionLimit,\n    },\n    {\n      section: 'growth',\n      sectionTitle: zh.growthCandidates,\n      q: `stars:>${growthMinStars} ${baseQuery}`,\n      sort: 'updated',\n      order: 'desc',\n      per_page: growthCandidateLimit,\n    },\n  ];\n\n  return queries.map((query) => ({ json: { ...common, ...query } }));\n})('command', inputJson);"
+      },
+      "id": "BuildCommandQueries",
+      "name": "Build Command GitHub Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const zh = {\n  \"mature\": \"成熟活跃项目\",\n  \"potential\": \"潜力项目\",\n  \"growthCandidates\": \"增长候选项目\",\n  \"noDesc\": \"暂无描述\",\n  \"noRepos\": \"没有找到符合条件的项目。\",\n  \"language\": \"语言：\",\n  \"updated\": \"最近更新：\",\n  \"growthTitle\": \"三、增长最快项目\",\n  \"syntheticSuffix\": \"（测试数据，真实增长榜将在下次周报生成）\",\n  \"noRealGrowth\": \"暂未计算出正增长项目。\",\n  \"noGrowthCandidates\": \"没有增长候选项目，可降低 GITHUB_RADAR_GROWTH_MIN_STARS。\",\n  \"growthSyntheticLabel\": \" / 本周（测试）\",\n  \"growthRealLabel\": \" / 本周\",\n  \"currentStars\": \"当前 stars：\",\n  \"title\": \"本周 GitHub 项目雷达\",\n  \"filter\": \"筛选：非 fork、未归档、最近\",\n  \"filterTail\": \"天内更新；不限定语言或方向。\",\n  \"matureSection\": \"一、成熟活跃项目\",\n  \"potentialSection\": \"二、潜力项目\"\n};\nconst inputJson = $json || {};\nreturn (function buildRadarQueries(triggerType, inputJson) {\n  const now = new Date();\n  const pad = (value) => String(value).padStart(2, '0');\n  const fmt = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;\n  const boundedInt = (value, fallback, min, max) => {\n    const parsed = Number(value);\n    if (!Number.isFinite(parsed)) return fallback;\n    return Math.min(Math.max(Math.trunc(parsed), min), max);\n  };\n\n  const day = now.getDay();\n  const daysSinceMonday = (day + 6) % 7;\n  const thisMonday = new Date(now);\n  thisMonday.setDate(now.getDate() - daysSinceMonday);\n  thisMonday.setHours(0, 0, 0, 0);\n  const activeSinceDate = new Date(now);\n\n  const sectionLimit = boundedInt($env.GITHUB_RADAR_SECTION_LIMIT || $env.GITHUB_WEEKLY_LIMIT || 5, 5, 1, 10);\n  const activeDays = boundedInt($env.GITHUB_RADAR_ACTIVE_DAYS || 30, 30, 1, 365);\n  const matureMinStars = boundedInt($env.GITHUB_RADAR_MATURE_MIN_STARS || 10000, 10000, 1, 100000000);\n  const potentialMinStars = boundedInt($env.GITHUB_RADAR_POTENTIAL_MIN_STARS || 500, 500, 1, 100000000);\n  const potentialMaxStars = boundedInt($env.GITHUB_RADAR_POTENTIAL_MAX_STARS || 10000, 10000, potentialMinStars, 100000000);\n  const growthMinStars = boundedInt($env.GITHUB_RADAR_GROWTH_MIN_STARS || 500, 500, 1, 100000000);\n  const growthCandidateLimit = boundedInt($env.GITHUB_RADAR_GROWTH_CANDIDATE_LIMIT || 50, 50, sectionLimit, 100);\n\n  activeSinceDate.setDate(now.getDate() - activeDays);\n  const activeSince = fmt(activeSinceDate);\n  const weekKey = fmt(thisMonday);\n  const baseQuery = `fork:false archived:false pushed:>${activeSince}`;\n\n  const common = {\n    trigger_type: triggerType,\n    input: inputJson.input || inputJson.command_text || '',\n    reportDate: fmt(now),\n    weekKey,\n    activeSince,\n    activeDays,\n    sectionLimit,\n    matureMinStars,\n    potentialMinStars,\n    potentialMaxStars,\n    growthMinStars,\n    growthCandidateLimit,\n  };\n\n  const queries = [\n    {\n      section: 'mature',\n      sectionTitle: zh.mature,\n      q: `stars:>${matureMinStars} ${baseQuery}`,\n      sort: 'stars',\n      order: 'desc',\n      per_page: sectionLimit,\n    },\n    {\n      section: 'potential',\n      sectionTitle: zh.potential,\n      q: `stars:${potentialMinStars}..${potentialMaxStars} ${baseQuery}`,\n      sort: 'stars',\n      order: 'desc',\n      per_page: sectionLimit,\n    },\n    {\n      section: 'growth',\n      sectionTitle: zh.growthCandidates,\n      q: `stars:>${growthMinStars} ${baseQuery}`,\n      sort: 'updated',\n      order: 'desc',\n      per_page: growthCandidateLimit,\n    },\n  ];\n\n  return queries.map((query) => ({ json: { ...common, ...query } }));\n})('schedule', inputJson);"
+      },
+      "id": "BuildScheduleQueries",
+      "name": "Build Schedule GitHub Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "HasGithubToken",
+              "leftValue": "={{($env.GITHUB_TOKEN || '').trim()}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "CommandHasGithubToken",
+      "name": "Command Has GitHub Token?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "HasGithubToken",
+              "leftValue": "={{($env.GITHUB_TOKEN || '').trim()}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ScheduleHasGithubToken",
+      "name": "Schedule Has GitHub Token?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        600,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{$json.q}}"
+            },
+            {
+              "name": "sort",
+              "value": "={{$json.sort}}"
+            },
+            {
+              "name": "order",
+              "value": "={{$json.order}}"
+            },
+            {
+              "name": "per_page",
+              "value": "={{$json.per_page}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env.GITHUB_TOKEN || '').trim()}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "CommandSearchAuthenticated",
+      "name": "Command Search Repositories (Token)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{$json.q}}"
+            },
+            {
+              "name": "sort",
+              "value": "={{$json.sort}}"
+            },
+            {
+              "name": "order",
+              "value": "={{$json.order}}"
+            },
+            {
+              "name": "per_page",
+              "value": "={{$json.per_page}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "CommandSearchAnonymous",
+      "name": "Command Search Repositories (Anonymous)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{$json.q}}"
+            },
+            {
+              "name": "sort",
+              "value": "={{$json.sort}}"
+            },
+            {
+              "name": "order",
+              "value": "={{$json.order}}"
+            },
+            {
+              "name": "per_page",
+              "value": "={{$json.per_page}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env.GITHUB_TOKEN || '').trim()}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ScheduleSearchAuthenticated",
+      "name": "Schedule Search Repositories (Token)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{$json.q}}"
+            },
+            {
+              "name": "sort",
+              "value": "={{$json.sort}}"
+            },
+            {
+              "name": "order",
+              "value": "={{$json.order}}"
+            },
+            {
+              "name": "per_page",
+              "value": "={{$json.per_page}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ScheduleSearchAnonymous",
+      "name": "Schedule Search Repositories (Anonymous)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const zh = {\n  \"mature\": \"成熟活跃项目\",\n  \"potential\": \"潜力项目\",\n  \"growthCandidates\": \"增长候选项目\",\n  \"noDesc\": \"暂无描述\",\n  \"noRepos\": \"没有找到符合条件的项目。\",\n  \"language\": \"语言：\",\n  \"updated\": \"最近更新：\",\n  \"growthTitle\": \"三、增长最快项目\",\n  \"syntheticSuffix\": \"（测试数据，真实增长榜将在下次周报生成）\",\n  \"noRealGrowth\": \"暂未计算出正增长项目。\",\n  \"noGrowthCandidates\": \"没有增长候选项目，可降低 GITHUB_RADAR_GROWTH_MIN_STARS。\",\n  \"growthSyntheticLabel\": \" / 本周（测试）\",\n  \"growthRealLabel\": \" / 本周\",\n  \"currentStars\": \"当前 stars：\",\n  \"title\": \"本周 GitHub 项目雷达\",\n  \"filter\": \"筛选：非 fork、未归档、最近\",\n  \"filterTail\": \"天内更新；不限定语言或方向。\",\n  \"matureSection\": \"一、成熟活跃项目\",\n  \"potentialSection\": \"二、潜力项目\"\n};\nreturn (function formatRadarDigest(sourceNodeName, triggerType) {\n  const sourceItems = $input.all();\n  const queryItems = $(sourceNodeName).all();\n  const queries = queryItems.map((item) => item.json);\n  const responses = {};\n\n  sourceItems.forEach((item, index) => {\n    const query = queries[index];\n    if (query) {\n      responses[query.section] = item.json || {};\n    }\n  });\n\n  const firstQuery = queries[0] || {\n    trigger_type: triggerType,\n    reportDate: new Date().toISOString().slice(0, 10),\n    weekKey: new Date().toISOString().slice(0, 10),\n    activeSince: '',\n    activeDays: 30,\n    sectionLimit: 5,\n  };\n  const sectionLimit = firstQuery.sectionLimit || 5;\n  const nowIso = new Date().toISOString();\n\n  const normalizeRepo = (repo) => ({\n    full_name: repo.full_name || '',\n    html_url: repo.html_url || '',\n    description: repo.description || '',\n    stargazers_count: Number(repo.stargazers_count || 0),\n    language: repo.language || 'Unknown',\n    pushed_at: repo.pushed_at || '',\n    created_at: repo.created_at || '',\n    owner: repo.owner ? { login: repo.owner.login, html_url: repo.owner.html_url } : undefined,\n    topics: repo.topics || [],\n  });\n  const normalizeList = (section) => ((responses[section] || {}).items || []).map(normalizeRepo);\n  const formatStars = (value) => Number(value || 0).toLocaleString('en-US');\n  const formatDate = (value) => value ? String(value).slice(0, 10) : 'unknown';\n  const truncate = (value, maxLength = 90) => {\n    const text = String(value || '').replace(/\\s+/g, ' ').trim();\n    if (!text) return zh.noDesc;\n    return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;\n  };\n\n  const matureRepos = normalizeList('mature').slice(0, sectionLimit);\n  const potentialRepos = normalizeList('potential').slice(0, sectionLimit);\n  const selectedNames = new Set([...matureRepos, ...potentialRepos].map((repo) => repo.full_name));\n  const growthCandidates = normalizeList('growth');\n\n  const staticData = $getWorkflowStaticData('global');\n  const snapshotStore = staticData.github_project_radar_snapshots || {};\n  const previousSnapshot = snapshotStore.previous || {};\n  const previousRepos = previousSnapshot.repos || {};\n  const hasPreviousSnapshot = Object.keys(previousRepos).length > 0;\n  const fakeGrowthSetting = String($env.GITHUB_RADAR_FAKE_GROWTH_ON_FIRST_RUN || 'true').trim().toLowerCase();\n  const fakeGrowthOnFirstRun = !['0', 'false', 'no', 'off'].includes(fakeGrowthSetting);\n\n  const syntheticGrowth = (repo, index) => {\n    const base = Math.max(25, Math.round(repo.stargazers_count * 0.015));\n    return Math.max(1, base - index * 7);\n  };\n  const growthRepos = growthCandidates\n    .map((repo, index) => {\n      const previous = previousRepos[repo.full_name];\n      const realGrowth = previous ? Math.max(0, repo.stargazers_count - Number(previous.stars || 0)) : 0;\n      const growth = hasPreviousSnapshot ? realGrowth : (fakeGrowthOnFirstRun ? syntheticGrowth(repo, index) : 0);\n      return {\n        ...repo,\n        weekly_growth: growth,\n        previous_stars: previous ? Number(previous.stars || 0) : null,\n        growth_is_synthetic: !hasPreviousSnapshot,\n      };\n    })\n    .filter((repo) => repo.weekly_growth > 0)\n    .sort((left, right) => right.weekly_growth - left.weekly_growth)\n    .filter((repo) => !selectedNames.has(repo.full_name))\n    .slice(0, sectionLimit);\n\n  if (triggerType === 'schedule') {\n    const currentRepos = {};\n    growthCandidates.forEach((repo) => {\n      currentRepos[repo.full_name] = {\n        stars: repo.stargazers_count,\n        html_url: repo.html_url,\n        language: repo.language,\n        pushed_at: repo.pushed_at,\n      };\n    });\n    staticData.github_project_radar_snapshots = {\n      previous: {\n        weekKey: firstQuery.weekKey,\n        generated_at: nowIso,\n        repos: currentRepos,\n      },\n      last_compared_snapshot: hasPreviousSnapshot ? previousSnapshot : null,\n    };\n  }\n\n  const appendRepoSection = (lines, title, repos) => {\n    lines.push('');\n    lines.push(`${title} Top ${sectionLimit}`);\n    if (!repos.length) {\n      lines.push(zh.noRepos);\n      return;\n    }\n    repos.forEach((repo, index) => {\n      lines.push(`${index + 1}. ${repo.full_name} - ${formatStars(repo.stargazers_count)} stars`);\n      lines.push(`   ${truncate(repo.description)}`);\n      lines.push(`   ${zh.language}${repo.language} | ${zh.updated}${formatDate(repo.pushed_at)}`);\n      lines.push(`   ${repo.html_url}`);\n    });\n  };\n\n  const appendGrowthSection = (lines, repos) => {\n    const suffix = hasPreviousSnapshot ? '' : zh.syntheticSuffix;\n    lines.push('');\n    lines.push(`${zh.growthTitle} Top ${sectionLimit}${suffix}`);\n    if (!repos.length) {\n      lines.push(hasPreviousSnapshot ? zh.noRealGrowth : zh.noGrowthCandidates);\n      return;\n    }\n    repos.forEach((repo, index) => {\n      const growthLabel = repo.growth_is_synthetic ? zh.growthSyntheticLabel : zh.growthRealLabel;\n      lines.push(`${index + 1}. ${repo.full_name} - +${formatStars(repo.weekly_growth)} stars${growthLabel}`);\n      lines.push(`   ${zh.currentStars}${formatStars(repo.stargazers_count)}`);\n      lines.push(`   ${truncate(repo.description)}`);\n      lines.push(`   ${zh.language}${repo.language} | ${zh.updated}${formatDate(repo.pushed_at)}`);\n      lines.push(`   ${repo.html_url}`);\n    });\n  };\n\n  const lines = [\n    `${zh.title}\\uff08${firstQuery.reportDate}\\uff09`,\n    `${zh.filter} ${firstQuery.activeDays} ${zh.filterTail}`,\n  ];\n  appendRepoSection(lines, zh.matureSection, matureRepos);\n  appendRepoSection(lines, zh.potentialSection, potentialRepos);\n  appendGrowthSection(lines, growthRepos);\n\n  const sections = {\n    mature: matureRepos,\n    potential: potentialRepos,\n    growth: growthRepos,\n  };\n  const querySummary = Object.fromEntries(queries.map((query) => [query.section, {\n    q: query.q,\n    sort: query.sort,\n    order: query.order,\n    per_page: query.per_page,\n  }]));\n\n  return [{\n    json: {\n      text: lines.join('\\n'),\n      data: {\n        reportDate: firstQuery.reportDate,\n        weekKey: firstQuery.weekKey,\n        activeSince: firstQuery.activeSince,\n        activeDays: firstQuery.activeDays,\n        sectionLimit,\n        growthSnapshotMode: hasPreviousSnapshot ? 'real' : 'synthetic_first_run',\n        sections,\n      },\n      metadata: {\n        source: 'github_project_radar',\n        trigger_type: triggerType,\n        generated_at: nowIso,\n        has_previous_growth_snapshot: hasPreviousSnapshot,\n        q: querySummary,\n      },\n    },\n  }];\n})('Build Command GitHub Queries', 'command');"
+      },
+      "id": "FormatCommandDigest",
+      "name": "Format Command Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const zh = {\n  \"mature\": \"成熟活跃项目\",\n  \"potential\": \"潜力项目\",\n  \"growthCandidates\": \"增长候选项目\",\n  \"noDesc\": \"暂无描述\",\n  \"noRepos\": \"没有找到符合条件的项目。\",\n  \"language\": \"语言：\",\n  \"updated\": \"最近更新：\",\n  \"growthTitle\": \"三、增长最快项目\",\n  \"syntheticSuffix\": \"（测试数据，真实增长榜将在下次周报生成）\",\n  \"noRealGrowth\": \"暂未计算出正增长项目。\",\n  \"noGrowthCandidates\": \"没有增长候选项目，可降低 GITHUB_RADAR_GROWTH_MIN_STARS。\",\n  \"growthSyntheticLabel\": \" / 本周（测试）\",\n  \"growthRealLabel\": \" / 本周\",\n  \"currentStars\": \"当前 stars：\",\n  \"title\": \"本周 GitHub 项目雷达\",\n  \"filter\": \"筛选：非 fork、未归档、最近\",\n  \"filterTail\": \"天内更新；不限定语言或方向。\",\n  \"matureSection\": \"一、成熟活跃项目\",\n  \"potentialSection\": \"二、潜力项目\"\n};\nreturn (function formatRadarDigest(sourceNodeName, triggerType) {\n  const sourceItems = $input.all();\n  const queryItems = $(sourceNodeName).all();\n  const queries = queryItems.map((item) => item.json);\n  const responses = {};\n\n  sourceItems.forEach((item, index) => {\n    const query = queries[index];\n    if (query) {\n      responses[query.section] = item.json || {};\n    }\n  });\n\n  const firstQuery = queries[0] || {\n    trigger_type: triggerType,\n    reportDate: new Date().toISOString().slice(0, 10),\n    weekKey: new Date().toISOString().slice(0, 10),\n    activeSince: '',\n    activeDays: 30,\n    sectionLimit: 5,\n  };\n  const sectionLimit = firstQuery.sectionLimit || 5;\n  const nowIso = new Date().toISOString();\n\n  const normalizeRepo = (repo) => ({\n    full_name: repo.full_name || '',\n    html_url: repo.html_url || '',\n    description: repo.description || '',\n    stargazers_count: Number(repo.stargazers_count || 0),\n    language: repo.language || 'Unknown',\n    pushed_at: repo.pushed_at || '',\n    created_at: repo.created_at || '',\n    owner: repo.owner ? { login: repo.owner.login, html_url: repo.owner.html_url } : undefined,\n    topics: repo.topics || [],\n  });\n  const normalizeList = (section) => ((responses[section] || {}).items || []).map(normalizeRepo);\n  const formatStars = (value) => Number(value || 0).toLocaleString('en-US');\n  const formatDate = (value) => value ? String(value).slice(0, 10) : 'unknown';\n  const truncate = (value, maxLength = 90) => {\n    const text = String(value || '').replace(/\\s+/g, ' ').trim();\n    if (!text) return zh.noDesc;\n    return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;\n  };\n\n  const matureRepos = normalizeList('mature').slice(0, sectionLimit);\n  const potentialRepos = normalizeList('potential').slice(0, sectionLimit);\n  const selectedNames = new Set([...matureRepos, ...potentialRepos].map((repo) => repo.full_name));\n  const growthCandidates = normalizeList('growth');\n\n  const staticData = $getWorkflowStaticData('global');\n  const snapshotStore = staticData.github_project_radar_snapshots || {};\n  const previousSnapshot = snapshotStore.previous || {};\n  const previousRepos = previousSnapshot.repos || {};\n  const hasPreviousSnapshot = Object.keys(previousRepos).length > 0;\n  const fakeGrowthSetting = String($env.GITHUB_RADAR_FAKE_GROWTH_ON_FIRST_RUN || 'true').trim().toLowerCase();\n  const fakeGrowthOnFirstRun = !['0', 'false', 'no', 'off'].includes(fakeGrowthSetting);\n\n  const syntheticGrowth = (repo, index) => {\n    const base = Math.max(25, Math.round(repo.stargazers_count * 0.015));\n    return Math.max(1, base - index * 7);\n  };\n  const growthRepos = growthCandidates\n    .map((repo, index) => {\n      const previous = previousRepos[repo.full_name];\n      const realGrowth = previous ? Math.max(0, repo.stargazers_count - Number(previous.stars || 0)) : 0;\n      const growth = hasPreviousSnapshot ? realGrowth : (fakeGrowthOnFirstRun ? syntheticGrowth(repo, index) : 0);\n      return {\n        ...repo,\n        weekly_growth: growth,\n        previous_stars: previous ? Number(previous.stars || 0) : null,\n        growth_is_synthetic: !hasPreviousSnapshot,\n      };\n    })\n    .filter((repo) => repo.weekly_growth > 0)\n    .sort((left, right) => right.weekly_growth - left.weekly_growth)\n    .filter((repo) => !selectedNames.has(repo.full_name))\n    .slice(0, sectionLimit);\n\n  if (triggerType === 'schedule') {\n    const currentRepos = {};\n    growthCandidates.forEach((repo) => {\n      currentRepos[repo.full_name] = {\n        stars: repo.stargazers_count,\n        html_url: repo.html_url,\n        language: repo.language,\n        pushed_at: repo.pushed_at,\n      };\n    });\n    staticData.github_project_radar_snapshots = {\n      previous: {\n        weekKey: firstQuery.weekKey,\n        generated_at: nowIso,\n        repos: currentRepos,\n      },\n      last_compared_snapshot: hasPreviousSnapshot ? previousSnapshot : null,\n    };\n  }\n\n  const appendRepoSection = (lines, title, repos) => {\n    lines.push('');\n    lines.push(`${title} Top ${sectionLimit}`);\n    if (!repos.length) {\n      lines.push(zh.noRepos);\n      return;\n    }\n    repos.forEach((repo, index) => {\n      lines.push(`${index + 1}. ${repo.full_name} - ${formatStars(repo.stargazers_count)} stars`);\n      lines.push(`   ${truncate(repo.description)}`);\n      lines.push(`   ${zh.language}${repo.language} | ${zh.updated}${formatDate(repo.pushed_at)}`);\n      lines.push(`   ${repo.html_url}`);\n    });\n  };\n\n  const appendGrowthSection = (lines, repos) => {\n    const suffix = hasPreviousSnapshot ? '' : zh.syntheticSuffix;\n    lines.push('');\n    lines.push(`${zh.growthTitle} Top ${sectionLimit}${suffix}`);\n    if (!repos.length) {\n      lines.push(hasPreviousSnapshot ? zh.noRealGrowth : zh.noGrowthCandidates);\n      return;\n    }\n    repos.forEach((repo, index) => {\n      const growthLabel = repo.growth_is_synthetic ? zh.growthSyntheticLabel : zh.growthRealLabel;\n      lines.push(`${index + 1}. ${repo.full_name} - +${formatStars(repo.weekly_growth)} stars${growthLabel}`);\n      lines.push(`   ${zh.currentStars}${formatStars(repo.stargazers_count)}`);\n      lines.push(`   ${truncate(repo.description)}`);\n      lines.push(`   ${zh.language}${repo.language} | ${zh.updated}${formatDate(repo.pushed_at)}`);\n      lines.push(`   ${repo.html_url}`);\n    });\n  };\n\n  const lines = [\n    `${zh.title}\\uff08${firstQuery.reportDate}\\uff09`,\n    `${zh.filter} ${firstQuery.activeDays} ${zh.filterTail}`,\n  ];\n  appendRepoSection(lines, zh.matureSection, matureRepos);\n  appendRepoSection(lines, zh.potentialSection, potentialRepos);\n  appendGrowthSection(lines, growthRepos);\n\n  const sections = {\n    mature: matureRepos,\n    potential: potentialRepos,\n    growth: growthRepos,\n  };\n  const querySummary = Object.fromEntries(queries.map((query) => [query.section, {\n    q: query.q,\n    sort: query.sort,\n    order: query.order,\n    per_page: query.per_page,\n  }]));\n\n  return [{\n    json: {\n      text: lines.join('\\n'),\n      data: {\n        reportDate: firstQuery.reportDate,\n        weekKey: firstQuery.weekKey,\n        activeSince: firstQuery.activeSince,\n        activeDays: firstQuery.activeDays,\n        sectionLimit,\n        growthSnapshotMode: hasPreviousSnapshot ? 'real' : 'synthetic_first_run',\n        sections,\n      },\n      metadata: {\n        source: 'github_project_radar',\n        trigger_type: triggerType,\n        generated_at: nowIso,\n        has_previous_growth_snapshot: hasPreviousSnapshot,\n        q: querySummary,\n      },\n    },\n  }];\n})('Build Schedule GitHub Queries', 'schedule');"
+      },
+      "id": "FormatScheduleDigest",
+      "name": "Format Schedule Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "IsCommand",
+              "leftValue": "={{$json.metadata.trigger_type}}",
+              "rightValue": "command",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "RouteCommandDigest",
+      "name": "Route Command Digest",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "IsSchedule",
+              "leftValue": "={{$json.metadata.trigger_type}}",
+              "rightValue": "schedule",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "RouteScheduleDigest",
+      "name": "Route Schedule Digest",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {}
+      },
+      "id": "RespondToCommand",
+      "name": "Respond to Command",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.KAKA_CORE_BASE_URL || 'http://127.0.0.1:8001').replace(/\\/$/, '') + '/v1/notifications'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + $env.PLUGIN_NOTIFICATION_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const sceneType = $env.GITHUB_RADAR_TARGET_SCENE_TYPE || $env.GITHUB_WEEKLY_TARGET_SCENE_TYPE || 'group'; const sceneId = $env.GITHUB_RADAR_TARGET_SCENE_ID || $env.GITHUB_WEEKLY_TARGET_SCENE_ID; return { target: { platform: 'qq', scene_type: sceneType, scene_id: sceneId }, content: { type: 'text', text: $json.text }, source: 'n8n:github_project_radar', idempotency_key: `github-project-radar:${$json.data.weekKey}:${sceneType}:${sceneId}`, metadata: { workflow: 'github_project_radar', reportDate: $json.data.reportDate, weekKey: $json.data.weekKey, activeSince: $json.data.activeSince, q: $json.metadata.q } }; })() }}"
+      },
+      "id": "PostScheduledDigestToKaka",
+      "name": "Post Scheduled Digest to Kaka",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        320
+      ]
+    }
+  ],
+  "connections": {
+    "Command Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Command GitHub Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Build Schedule GitHub Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Command GitHub Queries": {
+      "main": [
+        [
+          {
+            "node": "Command Has GitHub Token?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Schedule GitHub Queries": {
+      "main": [
+        [
+          {
+            "node": "Schedule Has GitHub Token?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Has GitHub Token?": {
+      "main": [
+        [
+          {
+            "node": "Command Search Repositories (Token)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Command Search Repositories (Anonymous)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Has GitHub Token?": {
+      "main": [
+        [
+          {
+            "node": "Schedule Search Repositories (Token)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Schedule Search Repositories (Anonymous)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Search Repositories (Token)": {
+      "main": [
+        [
+          {
+            "node": "Format Command Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Search Repositories (Anonymous)": {
+      "main": [
+        [
+          {
+            "node": "Format Command Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Search Repositories (Token)": {
+      "main": [
+        [
+          {
+            "node": "Format Schedule Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Search Repositories (Anonymous)": {
+      "main": [
+        [
+          {
+            "node": "Format Schedule Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Command Digest": {
+      "main": [
+        [
+          {
+            "node": "Route Command Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Schedule Digest": {
+      "main": [
+        [
+          {
+            "node": "Route Schedule Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Command Digest": {
+      "main": [
+        [
+          {
+            "node": "Respond to Command",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Route Schedule Digest": {
+      "main": [
+        [
+          {
+            "node": "Post Scheduled Digest to Kaka",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2026-06-15T00:00:00.000Z",
+  "versionId": "github-project-radar-v1"
+}
