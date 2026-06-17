@@ -272,3 +272,48 @@ class AutoJobRunRecord(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DesktopOperationRecord(Base):
+    """卡咔的桌面操作任务。
+
+    卡咔可以在主人电脑上执行操作（创建文件、截图、播放音效等）。
+    这些能力是卡咔本身的能力，不暴露"助手"概念。
+    """
+
+    __tablename__ = "desktop_operations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # 操作基本信息
+    operation_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+
+    # 请求来源
+    requester_user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    requester_scene_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    requester_scene_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="private",
+        server_default="private",
+    )
+    requester_platform: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    # 卡咔的决策信息
+    approved: Mapped[bool] = mapped_column(nullable=False, default=True)
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kaka_mood: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # 执行状态
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # 时间戳
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # 审计
+    permission_level: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

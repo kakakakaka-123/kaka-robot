@@ -720,6 +720,86 @@ def test_write_candidates_marks_inputs_and_deduplicates():
     assert memories["llm-candidate-1"].candidate_memory == "用户可能需要继续讨论这个地方。"
 
 
+def test_repeated_llm_errors_eventually_mark_input_failed():
+    """LLM 反复失败的 input 累计到重试上限后落到 analysis_failed，不再无限重投。"""
+
+    module = load_script_module()
+    engine = create_engine("sqlite:///:memory:")
+    module.InputRecord.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+    with session_factory() as session:
+        user = UserRecord(
+            platform="qq",
+            platform_user_id="10001",
+            display_name="测试用户",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        scene = SceneRecord(
+            platform="qq",
+            scene_type="group",
+            scene_id="20002",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        session.add_all([user, scene])
+        session.flush()
+        llm_error = InputRecord(
+            event_id="llm-error-retry",
+            user=user,
+            scene=scene,
+            content_type="text",
+            content_text="这是真的",
+            raw_event={},
+            extra_metadata={},
+            analysis_status="not_analyzed",
+            created_at=utc_now(),
+        )
+        session.add(llm_error)
+        session.commit()
+
+        rows = module.load_unanalyzed_inputs(session, module.AnalysisFilters(limit=10))
+        classified_rows = module.classify_rows(rows)
+        batch_results = {
+            llm_error.id: module.LLMAnalysisResult(
+                label="error",
+                memory_type="none",
+                confidence=0.0,
+                reason="LLM 调用失败",
+                error="boom",
+            ),
+        }
+
+        # 前 ANALYSIS_MAX_RETRIES - 1 次失败后仍保持 not_analyzed，可继续重试。
+        for _ in range(module.ANALYSIS_MAX_RETRIES - 1):
+            module.write_candidates_and_mark_inputs(
+                session,
+                classified_rows,
+                batch_results,
+                analysis_model="deepseek-v4-flash",
+                analysis_prompt_version="test-prompt",
+            )
+            session.commit()
+            session.refresh(llm_error)
+            assert llm_error.analysis_status == "not_analyzed"
+
+        # 达到上限的这次失败把 input 落到终态 analysis_failed。
+        stats = module.write_candidates_and_mark_inputs(
+            session,
+            classified_rows,
+            batch_results,
+            analysis_model="deepseek-v4-flash",
+            analysis_prompt_version="test-prompt",
+        )
+        session.commit()
+        session.refresh(llm_error)
+
+    assert stats.failed_marked == 1
+    assert llm_error.analysis_status == module.ANALYSIS_STATUS_FAILED
+    assert llm_error.extra_metadata[module.ANALYSIS_RETRY_METADATA_KEY] == module.ANALYSIS_MAX_RETRIES
+
+
 def test_one_input_can_keep_multiple_distinct_candidates():
     module = load_script_module()
     engine = create_engine("sqlite:///:memory:")

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from kaka_core.api.admin_routes import admin_api_router, mount_web_console
+from kaka_core.api.desktop_routes import router as desktop_router
 from kaka_core.api.routes import router
 from kaka_core.memory.auto_analysis import create_auto_analysis_scheduler
 from kaka_core.memory.auto_review import create_auto_review_scheduler
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(router)
     app.include_router(admin_api_router)
+    app.include_router(desktop_router)
     mount_web_console(app)
     return app
 

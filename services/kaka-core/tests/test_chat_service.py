@@ -26,7 +26,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 
-GOLDEN_SCENARIOS_PATH = Path(__file__).parent / "fixtures" / "kaka_reply_golden_scenarios.json"
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+GOLDEN_SCENARIOS_PATH = FIXTURES_DIR / "kaka_reply_golden_scenarios.json"
+TEST_PERSONA_RELATIVE_PATH = "services/kaka-core/tests/fixtures/test_persona_prompt.md"
 
 
 def load_golden_scenarios() -> list[dict[str, object]]:
@@ -228,6 +230,38 @@ async def test_generate_chat_response_uses_router_when_llm_enabled(monkeypatch, 
 
 
 @pytest.mark.anyio
+async def test_generate_chat_response_fails_closed_when_dedup_lookup_errors(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """去重查询出错时必须 fail-closed：不调用 LLM、不发回复。"""
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'dedup-error.sqlite3'}")
+    monkeypatch.setenv("LLM_ENABLED", "true")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    get_settings.cache_clear()
+
+    from kaka_core.chat import service as chat_service
+    from kaka_core.chat.service import EventDedupError
+
+    def boom(_event):
+        raise EventDedupError("database is unavailable")
+
+    monkeypatch.setattr(chat_service, "load_existing_response_safely", boom)
+
+    router = FakeRouter()
+    response = await generate_chat_response(
+        make_event(event_id="dedup-error-event"),
+        router=router,
+    )
+
+    assert response.should_reply is False
+    assert response.metadata.get("reason") == "dedup_unavailable"
+    assert router.calls == 0
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
 async def test_generate_chat_response_ignores_plugin_command_when_plugins_disabled(
     monkeypatch,
     tmp_path,
@@ -278,7 +312,7 @@ async def test_generate_chat_response_handles_n8n_plugin_missing_config(
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("LLM_ENABLED", "false")
     monkeypatch.setenv("PLUGIN_SYSTEM_ENABLED", "true")
-    monkeypatch.delenv("PLUGIN_N8N_WEBHOOK_BASE_URL", raising=False)
+    monkeypatch.setenv("PLUGIN_N8N_WEBHOOK_BASE_URL", "")
     get_settings.cache_clear()
 
     response = await generate_chat_response(
@@ -359,7 +393,7 @@ async def test_generate_chat_response_resolves_relative_persona_path_from_repo_r
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("LLM_ENABLED", "true")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
-    monkeypatch.setenv("KAKA_PERSONA_PROMPT_PATH", "prompts/kaka_persona.md")
+    monkeypatch.setenv("KAKA_PERSONA_PROMPT_PATH", TEST_PERSONA_RELATIVE_PATH)
     monkeypatch.chdir(tmp_path)
     get_settings.cache_clear()
 
@@ -367,9 +401,10 @@ async def test_generate_chat_response_resolves_relative_persona_path_from_repo_r
     response = await generate_chat_response(make_event(), router=router)
 
     assert response.metadata["persona_prompt_source"] == "file"
-    assert response.metadata["persona_prompt_path"].endswith("prompts\\kaka_persona.md")
+    assert Path(response.metadata["persona_prompt_path"]).name == "test_persona_prompt.md"
     assert response.metadata["persona_prompt_fallback_used"] is False
     assert "persona_prompt_error" not in response.metadata
+    assert "你是测试夹具里的卡咔" in router.messages[0].content
     get_settings.cache_clear()
 
 

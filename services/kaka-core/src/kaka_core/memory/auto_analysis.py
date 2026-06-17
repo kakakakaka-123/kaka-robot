@@ -38,6 +38,7 @@ class AutoAnalysisRunSummary:
     analyzed_marked: int = 0
     llm_errors_left_unprocessed: int = 0
     missing_llm_results: int = 0
+    failed_marked: int = 0
 
 
 @dataclass
@@ -187,6 +188,20 @@ async def run_auto_analysis_check(
         summary.analyzed_marked += write_stats.analyzed_marked
         summary.llm_errors_left_unprocessed += write_stats.llm_errors_left_unprocessed
         summary.missing_llm_results += write_stats.missing_llm_results
+        summary.failed_marked += write_stats.failed_marked
+
+        # 本轮没有任何 input 落到终态（既没产出候选/标记 analyzed/skipped，
+        # 也没有累计到重试上限 failed），说明这批全是 LLM error/missing。
+        # 此时 not_analyzed 数量没下降，再循环只会把同一批重投给 LLM，直接退出。
+        # analyzed_marked 已经覆盖"命中已有候选、未新增但仍标记 analyzed"的情况，
+        # 所以这里不需要单独再看 existing_candidates。
+        made_progress = (
+            write_stats.total_skipped_marked
+            + write_stats.analyzed_marked
+            + write_stats.failed_marked
+        ) > 0
+        if not made_progress:
+            break
 
     if summary.processed_runs == 0:
         summary.ran = False
@@ -285,6 +300,7 @@ def auto_analysis_summary_to_job_run(
             "force": force,
             "llm_errors_left_unprocessed": summary.llm_errors_left_unprocessed,
             "missing_llm_results": summary.missing_llm_results,
+            "failed_marked": summary.failed_marked,
         },
         started_at=started_at,
         finished_at=finished_at,

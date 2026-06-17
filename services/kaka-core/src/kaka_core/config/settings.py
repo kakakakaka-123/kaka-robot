@@ -1,9 +1,12 @@
+﻿import logging
 import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 
 def _load_env_files() -> None:
@@ -17,8 +20,8 @@ def _load_env_files() -> None:
     repo_root = current_file.parents[5]
     service_root = current_file.parents[3]
 
-    load_dotenv(repo_root / ".env")
-    load_dotenv(service_root / ".env", override=False)
+    load_dotenv(repo_root / ".env", encoding="utf-8-sig")
+    load_dotenv(service_root / ".env", override=False, encoding="utf-8-sig")
 
 
 def _get_bool(name: str, default: bool) -> bool:
@@ -32,14 +35,27 @@ def _get_float(name: str, default: float) -> float:
     value = os.getenv(name)
     if value is None or value.strip() == "":
         return default
-    return float(value)
+    try:
+        return float(value)
+    except ValueError:
+        # 单个环境变量写错不应让整个进程在启动时崩溃；回退到默认值并告警。
+        logger.warning(
+            "环境变量 %s=%r 不是合法的浮点数，已回退到默认值 %s", name, value, default
+        )
+        return default
 
 
 def _get_int(name: str, default: int) -> int:
     value = os.getenv(name)
     if value is None or value.strip() == "":
         return default
-    return int(value)
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning(
+            "环境变量 %s=%r 不是合法的整数，已回退到默认值 %s", name, value, default
+        )
+        return default
 
 
 def _get_csv_set(name: str) -> frozenset[str]:
@@ -174,6 +190,11 @@ class PluginSettings:
     command_prefixes: tuple[str, ...]
     n8n_webhook_base_url: str
     n8n_webhook_timeout_seconds: float
+    s60_base_url: str
+    s60_timeout_seconds: float
+    github_api_base_url: str
+    github_timeout_seconds: float
+    github_token: str
 
 
 @dataclass(frozen=True)
@@ -275,10 +296,18 @@ def get_settings() -> Settings:
             enabled=_get_bool("PLUGIN_SYSTEM_ENABLED", False),
             command_prefixes=_get_csv_tuple(
                 "PLUGIN_COMMAND_PREFIXES",
-                ("插件：", "插件:", "plugin:"),
+                ("/", "插件：", "插件:", "plugin:"),
             ),
             n8n_webhook_base_url=os.getenv("PLUGIN_N8N_WEBHOOK_BASE_URL", "").rstrip("/"),
             n8n_webhook_timeout_seconds=_get_float("PLUGIN_N8N_WEBHOOK_TIMEOUT", 30.0),
+            s60_base_url=os.getenv("PLUGIN_60S_BASE_URL", "https://60s.viki.moe").rstrip("/"),
+            s60_timeout_seconds=_get_float("PLUGIN_60S_TIMEOUT", 15.0),
+            github_api_base_url=os.getenv(
+                "PLUGIN_GITHUB_API_BASE_URL",
+                "https://api.github.com",
+            ).rstrip("/"),
+            github_timeout_seconds=_get_float("PLUGIN_GITHUB_TIMEOUT", 15.0),
+            github_token=os.getenv("GITHUB_TOKEN", "").strip(),
         ),
         notifications=NotificationSettings(
             token=os.getenv("PLUGIN_NOTIFICATION_TOKEN", "").strip(),

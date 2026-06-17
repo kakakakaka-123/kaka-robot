@@ -78,8 +78,8 @@ def qq_text_event_to_message_event(event: QQTextEvent) -> MessageEvent:
         "raw_event": event.raw_event,
         "metadata": {"qq_message_id": event.message_id},
     }
-    if event.message_id:
-        payload["event_id"] = build_qq_event_id(event)
+    # message_id 为空时合成一个稳定 event_id，保证去重路径仍能工作。
+    payload["event_id"] = build_qq_event_id(event)
 
     return MessageEvent(**payload)
 

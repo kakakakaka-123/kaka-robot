@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 
 from kaka_core.storage.database import (
     EXPECTED_AUTO_JOB_RUN_COLUMNS,
+    EXPECTED_DESKTOP_OPERATION_COLUMNS,
     EXPECTED_INPUT_COLUMNS,
     EXPECTED_MEMORY_CANDIDATE_COLUMNS,
     EXPECTED_MEMORY_COLUMNS,
@@ -129,6 +130,10 @@ def test_init_database_migrates_legacy_messages_and_responses(tmp_path) -> None:
     }.issubset(memory_columns)
     assert [column["name"] for column in inspector.get_columns("memories")] == EXPECTED_MEMORY_COLUMNS
     assert [column["name"] for column in inspector.get_columns("auto_job_runs")] == EXPECTED_AUTO_JOB_RUN_COLUMNS
+
+    desktop_operation_columns = {column["name"] for column in inspector.get_columns("desktop_operations")}
+    assert "requester_scene_type" in desktop_operation_columns
+    assert [column["name"] for column in inspector.get_columns("desktop_operations")] == EXPECTED_DESKTOP_OPERATION_COLUMNS
 
 
 def test_event_processing_lock_is_single_owner(tmp_path) -> None:

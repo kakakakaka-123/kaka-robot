@@ -34,14 +34,12 @@ def _configure_notification_env(monkeypatch, tmp_path, db_name: str) -> None:
 
 
 def _patch_qq_adapter_post(monkeypatch, handler) -> None:
-    original_post = httpx.Client.post
-
-    def fake_post(self: httpx.Client, url: str, **kwargs: object) -> httpx.Response:
-        if url == "/v1/notifications":
-            return original_post(self, url, **kwargs)
+    # 通知投递改用 httpx.AsyncClient；TestClient 自身仍走同步 httpx.Client，
+    # 所以这里只需替换 AsyncClient.post，无需再区分 /v1/notifications 自调用。
+    async def fake_post(self: httpx.AsyncClient, url: str, **kwargs: object) -> httpx.Response:
         return handler(self, url, **kwargs)
 
-    monkeypatch.setattr(httpx.Client, "post", fake_post)
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
 
 def test_health_check() -> None:
@@ -54,7 +52,7 @@ def test_health_check() -> None:
 def test_chat_accepts_message_event_and_returns_kaka_response(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'api-test.sqlite3'}")
     monkeypatch.setenv("LLM_ENABLED", "false")
-    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_API_KEY", "")
     get_settings.cache_clear()
     event = MessageEvent(
         platform=Platform.QQ,
@@ -244,11 +242,8 @@ def test_notification_forwards_to_qq_adapter(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "qq-send-token")
     get_settings.cache_clear()
     captured: dict[str, object] = {}
-    original_post = httpx.Client.post
 
-    def fake_post(self: httpx.Client, url: str, **kwargs: object) -> httpx.Response:
-        if url == "/v1/notifications":
-            return original_post(self, url, **kwargs)
+    def fake_post(self: httpx.AsyncClient, url: str, **kwargs: object) -> httpx.Response:
         captured["url"] = url
         captured["headers"] = kwargs.get("headers")
         captured["json"] = kwargs.get("json")
@@ -262,7 +257,7 @@ def test_notification_forwards_to_qq_adapter(monkeypatch, tmp_path) -> None:
             },
         )
 
-    monkeypatch.setattr(httpx.Client, "post", fake_post)
+    _patch_qq_adapter_post(monkeypatch, fake_post)
 
     request = {
         "target": {"platform": "qq", "scene_type": "group", "scene_id": "20002"},

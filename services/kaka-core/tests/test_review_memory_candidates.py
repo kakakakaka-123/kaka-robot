@@ -143,6 +143,35 @@ def test_review_batch_and_apply_approves_and_rejects_candidates():
     assert [candidate.status for candidate in candidates] == ["approved", "rejected"]
 
 
+def test_apply_decisions_marks_error_candidates_terminal():
+    """复核反复失败的候选落到 review_error 终态，不再保持 pending 被反复重投。"""
+
+    module = load_script_module()
+    session_factory = create_session_factory()
+    with session_factory() as session:
+        user, scene = seed_user_and_scene(session)
+        candidate = seed_candidate(session, user, scene, "用户正在开发卡咔。")
+        decisions = [
+            module.ReviewDecision(
+                candidate=candidate,
+                action="error",
+                memory_text="",
+                memory_type=candidate.memory_type,
+                confidence=0.0,
+                reason="LLM 调用失败：boom",
+            )
+        ]
+        stats = module.apply_decisions(session, decisions)
+        session.commit()
+        session.refresh(candidate)
+
+        memory = session.scalar(select(MemoryRecord))
+
+    assert stats.errors == 1
+    assert memory is None
+    assert candidate.status == module.CANDIDATE_STATUS_ERROR
+
+
 def test_review_batch_marks_duplicate_within_same_batch():
     module = load_script_module()
     session_factory = create_session_factory()

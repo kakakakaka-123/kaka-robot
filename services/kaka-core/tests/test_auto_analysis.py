@@ -137,6 +137,7 @@ async def test_auto_analysis_force_ignores_threshold(monkeypatch):
                 analyzed_marked=0,
                 llm_errors_left_unprocessed=0,
                 missing_llm_results=0,
+                failed_marked=0,
             )
 
     monkeypatch.setattr(auto_analysis, "init_database", lambda: None)
@@ -308,6 +309,7 @@ async def test_auto_analysis_runs_at_most_two_batches(monkeypatch):
                 analyzed_marked=0,
                 llm_errors_left_unprocessed=0,
                 missing_llm_results=0,
+                failed_marked=0,
             )
 
     monkeypatch.setattr(auto_analysis, "init_database", lambda: None)

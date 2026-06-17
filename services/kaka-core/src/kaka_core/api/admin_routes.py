@@ -15,7 +15,12 @@ from kaka_core.admin import service
 from kaka_core.config.settings import get_settings
 from kaka_core.storage.database import create_session_factory, init_database
 
-LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+# 本机直连的受信对端地址。"testclient" 是 Starlette TestClient 的虚拟对端，
+# 不能放进生产常量——测试自行在 conftest 里通过 monkeypatch 注入。
+LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost"}
+# 经过反向代理时这些头会出现。local-only 仅凭 request.client.host 判断来源，
+# 而代理与后端同机时该值恒为 127.0.0.1，会让 local-only 对所有外部请求形同虚设。
+PROXY_FORWARD_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded")
 
 
 def verify_admin_access(
@@ -25,8 +30,23 @@ def verify_admin_access(
     settings = get_settings().admin
     client_host = request.client.host if request.client else ""
 
-    if settings.local_only and client_host not in LOCAL_CLIENT_HOSTS:
-        raise HTTPException(status_code=403, detail="admin api is local-only")
+    if settings.local_only:
+        # 请求带任何转发头，说明它经过了反向代理，此时 request.client.host 是
+        # 代理 IP（同机即 127.0.0.1），不能再当成"本机直连"放行。直接拒绝，
+        # 并提示改用 token 鉴权，避免 local-only 在反代后塌缩成无鉴权。
+        forwarded_via_proxy = any(
+            request.headers.get(header) for header in PROXY_FORWARD_HEADERS
+        )
+        if forwarded_via_proxy:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "admin api is local-only and cannot be trusted behind a proxy; "
+                    "set ADMIN_LOCAL_ONLY=false and configure ADMIN_API_TOKEN"
+                ),
+            )
+        if client_host not in LOCAL_CLIENT_HOSTS:
+            raise HTTPException(status_code=403, detail="admin api is local-only")
 
     if not settings.local_only and not settings.api_token:
         raise HTTPException(status_code=403, detail="admin api token is required when local-only is disabled")

@@ -42,7 +42,7 @@ class KakaCoreClient:
 
         if response.status_code >= 400:
             raise KakaCoreClientError(
-                f"kaka-core 请求失败：HTTP {response.status_code} {response.text}"
+                f"kaka-core 请求失败：HTTP {response.status_code} {response.text[:200]}"
             )
 
         return KakaResponse.model_validate(response.json())

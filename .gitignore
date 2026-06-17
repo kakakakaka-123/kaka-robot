@@ -38,3 +38,31 @@ data/media/*
 .vscode/
 Thumbs.db
 .DS_Store
+
+# === 隐私和创造性内容（不推送到 GitHub）===
+
+# 人设相关
+prompts/kaka_persona.md
+docs/卡咔人设设定.md
+docs/卡咔场景反应样例.md
+docs/卡咔负面情绪处理规则.md
+docs/卡咔对话回复分层设计.md
+docs/卡咔回复黄金场景集.md
+
+# 开发日志和交接文档
+开发日志/
+KAKA_HANDOFF.md
+docs/下次上下文.md
+docs/AB分支合并完成报告.md
+docs/ab-merge-review-*.md
+docs/全量测试与文档更新完成报告.md
+docs/功能开发完成总结.md
+docs/桌面操作能力-实现完成报告.md
+docs/路线图.md
+卡咔电子生命系统设计文档.md
+
+# 私有设计文档和计划
+docs/superpowers/
+
+# 准备脚本（内部使用）
+scripts/prepare_public_push.sh

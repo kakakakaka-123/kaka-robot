@@ -13,8 +13,8 @@ def _load_env_files() -> None:
     repo_root = current_file.parents[4]
     adapter_root = current_file.parents[2]
 
-    load_dotenv(repo_root / ".env")
-    load_dotenv(adapter_root / ".env", override=False)
+    load_dotenv(repo_root / ".env", encoding="utf-8-sig")
+    load_dotenv(adapter_root / ".env", override=False, encoding="utf-8-sig")
 
 
 @dataclass(frozen=True)

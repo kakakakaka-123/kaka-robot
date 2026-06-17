@@ -22,6 +22,22 @@ class N8nWebhookPlugin:
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._transport = transport
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        # 复用一个持久的 AsyncClient 以共享连接池；插件实例随运行时缓存存活，
+        # 不再每次调用都新建并丢弃客户端（每次都要重新建立 TCP/TLS 连接）。
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout_seconds,
+                transport=self._transport,
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
 
     async def can_handle(self, context: PluginContext) -> bool:
         workflow, _ = self._parse_command(context.command_text)
@@ -44,12 +60,9 @@ class N8nWebhookPlugin:
 
         payload = self._build_payload(context, workflow, workflow_input)
         try:
-            async with httpx.AsyncClient(
-                timeout=self._timeout_seconds,
-                transport=self._transport,
-            ) as client:
-                response = await client.post(self._workflow_url(workflow), json=payload)
-                response.raise_for_status()
+            client = self._get_client()
+            response = await client.post(self._workflow_url(workflow), json=payload)
+            response.raise_for_status()
         except httpx.HTTPError as exc:
             return PluginResult.text_reply(
                 self.id,

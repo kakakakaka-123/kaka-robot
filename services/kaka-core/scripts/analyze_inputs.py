@@ -94,6 +94,12 @@ PYCHARM_DEFAULT_ARGS: list[str] = []
 ANALYSIS_STATUS_NOT_ANALYZED = "not_analyzed"
 ANALYSIS_STATUS_SKIPPED = "skipped"
 ANALYSIS_STATUS_ANALYZED = "analyzed"
+# LLM error / missing 是瞬时失败，但不能让对应 input 永远停在 not_analyzed
+# 被每个整点反复重投。这里在 input.metadata 里记重试次数，超过上限后落到
+# 终态 analysis_failed（不再被 not_analyzed 查询命中），避免无限重试。
+ANALYSIS_STATUS_FAILED = "analysis_failed"
+ANALYSIS_RETRY_METADATA_KEY = "analysis_retry_count"
+ANALYSIS_MAX_RETRIES = 3
 MEMORY_CANDIDATE_STATUS_PENDING = "pending"
 RULE_ANALYSIS_MODEL = "rule"
 RULE_ANALYSIS_PROMPT_VERSION = "rule-candidate-v2"
@@ -455,6 +461,7 @@ class CandidateWriteStats:
     analyzed_marked: int = 0
     llm_errors_left_unprocessed: int = 0
     missing_llm_results: int = 0
+    failed_marked: int = 0
 
     @property
     def total_skipped_marked(self) -> int:
@@ -837,6 +844,23 @@ def contains_cjk_digit_or_letter(value: str) -> bool:
     return False
 
 
+def register_analysis_retry(input_record: InputRecord, stats: CandidateWriteStats) -> None:
+    """记录一次 LLM 失败重试。
+
+    LLM error / missing 多是批量瞬时问题，下一轮可能恢复，所以不会立刻判死。
+    但每次失败都会在 input.metadata 里累加重试次数；超过 ANALYSIS_MAX_RETRIES 后
+    落到终态 analysis_failed，不再被 not_analyzed 查询命中，避免每个整点无限重投。
+    """
+
+    metadata = dict(input_record.extra_metadata or {})
+    retry_count = int(metadata.get(ANALYSIS_RETRY_METADATA_KEY, 0)) + 1
+    metadata[ANALYSIS_RETRY_METADATA_KEY] = retry_count
+    input_record.extra_metadata = metadata
+    if retry_count >= ANALYSIS_MAX_RETRIES:
+        input_record.analysis_status = ANALYSIS_STATUS_FAILED
+        stats.failed_marked += 1
+
+
 def write_candidates_and_mark_inputs(
     session: Session,
     classified_rows: list[ClassifiedInput],
@@ -882,9 +906,11 @@ def write_candidates_and_mark_inputs(
         llm_result = batch_results.get(input_record.id)
         if llm_result is None:
             stats.missing_llm_results += 1
+            register_analysis_retry(input_record, stats)
             continue
         if llm_result.is_error:
             stats.llm_errors_left_unprocessed += 1
+            register_analysis_retry(input_record, stats)
             continue
         if llm_result.label == "skipped":
             input_record.analysis_status = ANALYSIS_STATUS_SKIPPED
@@ -1187,15 +1213,6 @@ def normalize_confidence(value: object) -> float:
     except (TypeError, ValueError):
         return 0.0
     return max(0.0, min(1.0, number))
-
-
-async def analyze_batches_with_llm(
-    classified_rows: list[ClassifiedInput],
-    router: LLMRouter | None,
-) -> dict[int, LLMAnalysisResult]:
-    """批量让大模型只读判断 not_sure 输入。"""
-
-    return await analyze_llm_batches(build_llm_batches(classified_rows), router)
 
 
 async def analyze_llm_batches(
@@ -1547,7 +1564,12 @@ def parse_llm_batch_analysis_reply(
 
 
 def extract_json_array(raw_reply: str) -> str:
-    """从模型回复中提取 JSON 数组。"""
+    """从模型回复中提取第一个完整 JSON 数组。
+
+    用 find("[") + rfind("]") 时，若回复含多个数组（如说明文字和数据数组），
+    会错误地从第一个 "[" 跨到最后一个 "]"，拼出无效 JSON。
+    改为找到第一个 "[" 后扫描匹配的 "]" 来定位正确的数组边界。
+    """
 
     text = raw_reply.strip()
     if text.startswith("```"):
@@ -1555,10 +1577,32 @@ def extract_json_array(raw_reply: str) -> str:
         text = re.sub(r"\s*```$", "", text)
 
     start = text.find("[")
-    end = text.rfind("]")
-    if start == -1 or end == -1 or end < start:
+    if start == -1:
         raise ValueError("未找到 JSON 数组")
-    return text[start : end + 1]
+
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i, ch in enumerate(text[start:], start):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+
+    raise ValueError("JSON 数组括号不匹配")
 
 
 def normalize_input_id(value: object) -> int | None:

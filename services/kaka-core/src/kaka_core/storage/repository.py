@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from sqlalchemy import delete, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from kaka_core.storage.models import (
@@ -121,6 +121,9 @@ def try_acquire_event_processing_lock(
     """尝试获取事件处理锁。
 
     返回 owner_token 表示已获取锁；返回 None 表示当前有其他处理者在工作。
+
+    注意：leased_until 列声明为 timezone=True，但这里存入的是 naive UTC 值。
+    在 SQLite（当前默认存储）下两者等价；迁移 PostgreSQL 后应改为存 tz-aware UTC。
     """
 
     now = _as_utc_naive(utc_now())
@@ -141,9 +144,12 @@ def try_acquire_event_processing_lock(
         try:
             session.commit()
             return owner_token
-        except IntegrityError:
+        except (IntegrityError, OperationalError):
+            # IntegrityError：另一进程并发插入了同一 event_id。
+            # OperationalError：SQLite 并发写锁超时（database is locked）。
+            # 两种情况都视为"锁被别人先拿走"，回滚后返回 None。
             session.rollback()
-            existing = session.get(EventProcessingLockRecord, event_id)
+            return None
 
     if existing is not None and _as_utc_naive(existing.leased_until) > now:
         session.rollback()
@@ -162,8 +168,12 @@ def try_acquire_event_processing_lock(
         )
     ).rowcount
     if updated:
-        session.commit()
-        return owner_token
+        try:
+            session.commit()
+            return owner_token
+        except OperationalError:
+            session.rollback()
+            return None
 
     session.rollback()
     return None

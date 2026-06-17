@@ -77,7 +77,7 @@ QQ 收到消息
 
 ## 当前已完成
 
-截至 2026-06-01，已经完成：
+截至 2026-06-17，已经完成：
 
 - `packages/kaka-protocol`：统一消息协议。
 - `services/kaka-core`：核心大脑 FastAPI 服务。
@@ -97,11 +97,16 @@ QQ 收到消息
 - 正式记忆检索预览脚本：`search_memories.py` 可按当前用户和当前消息，只读预览会命中的少量正式记忆。
 - 本地 Web 管理台：启动 `kaka-core` 后打开 `http://127.0.0.1:8001/admin`；当前 Web 界面保留系统总览、正式记忆、提示预演、对话复盘、运行状态和预留扩展入口。正式记忆页按 `memories.id` 倒序显示，支持每页 50 条分页、新增、编辑、归档、恢复和确认后硬删除；提示预演用于预览当前消息会命中的正式记忆和真实回复上下文；对话复盘用于回查卡咔已经回复过的真实对话，按 50 条分页展示，并能查看当次回复命中的正式记忆和短期上下文；运行状态页会显示最近自动候选分析/复核记录，并支持手动触发一次自动分析或复核；最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，但不再作为日常 Web 页面暴露。
 - `apps/desktop-pet`：卡咔桌宠第一版原型。技术组合为 Tauri 2 + React/Vite + TypeScript + PixiJS；当前是透明、无边框、置顶的 280x280 桌面窗口，已接入 12 张透明 PNG 状态图，支持右键状态菜单、轻点摸头反应、拖拽窗口、拖拽反应恢复、闲置睡觉、睡眠唤醒、托盘入口、设置窗口、消息气泡和轻量对话入口。桌宠已经能把本地输入作为 `platform=desktop` 的 `MessageEvent` 发送到 `kaka-core /v1/chat`，并把核心回复拆成气泡展示。桌宠的核心地址和桌面身份可通过 `.env` 里的 `KAKA_CORE_BASE_URL`、`KAKA_DESKTOP_*` 配置调整。
+- **桌面操作能力**：`apps/kaka-local` 本地执行组件。卡咔现在可以在主人电脑上执行操作（创建文件、截图等）。群友可以通过 QQ 让卡咔在桌面创建文件和小纸条。这些能力是卡咔本身的能力，对外不暴露"助手"概念。架构为：QQ消息 → kaka-core插件解析 → 数据库任务 → kaka-local轮询执行 → 上传结果 → 通知QQ。**已实现功能**：创建文件（✓）、截图（✓全屏/区域/敏感区域模糊）；音效播放尚未实现，当前会明确返回失败。安全机制：路径白名单（只能在 `~/Desktop/卡咔的小角落` 和 `~/Documents/卡咔` 操作）、文件名检查、扩展名限制。**通知投递**：已统一通知入口，当前可投递 QQ；截图通知自动附带截图。详见 `docs/桌面操作能力说明.md`、`docs/桌面操作功能-快速上手.md`、`docs/API文档.md`、`docs/插件开发指南.md`、`docs/部署指南.md`。
+- n8n 外部插件链路：`docs/n8n/github_weekly_stars.workflow.json` 现在是 `Kaka GitHub Project Radar` 工作流，保留旧 webhook 路径 `kaka/github_weekly_stars` 兼容命令 `/github项目雷达`（旧格式 `插件：n8n github_weekly_stars` 仍可用）。它每周生成一条 GitHub 项目雷达消息，包含“成熟活跃项目”“潜力项目”“增长最快项目”三段榜单，每段默认 5 个项目；首次运行没有历史快照时，增长榜会明确标注为测试数据，下次周报起使用 n8n workflow static data 中的 stars 快照计算真实增长。配置项见 `.env.example` 的 `GITHUB_RADAR_*`，说明见 `docs/GitHub周报外部插件说明.md`。另有 `/help` 内置帮助面板列出所有可用命令。
+- 60s API 内置插件：启用插件系统后，可用 `/今日新闻` 查看每日 60 秒新闻，可用 `/AI资讯` 查看 AI 资讯，可用 `/IT资讯` 查看 IT 资讯。插件默认调用 `https://60s.viki.moe`，可通过 `.env` 的 `PLUGIN_60S_BASE_URL` 和 `PLUGIN_60S_TIMEOUT` 调整。
+- GitHub 项目查询内置插件：启用插件系统后，可用 `/项目 owner/repo`、`/项目 GitHub链接` 查看仓库基本信息，可用 `/项目搜索 关键词` 按 stars 搜索 GitHub 项目。默认调用 `https://api.github.com`，可通过 `.env` 的 `PLUGIN_GITHUB_API_BASE_URL`、`PLUGIN_GITHUB_TIMEOUT` 和可选 `GITHUB_TOKEN` 调整。
+- n8n 当前推荐用 Docker 运行。若 n8n 在容器里，`KAKA_CORE_BASE_URL` 要在容器环境中配置成 `http://host.docker.internal:8001`，并设置 `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`，否则 Code 节点无法读取 `$env`，定时推送也无法访问宿主机 kaka-core。
+- 配置读取已兼容带 UTF-8 BOM 的 `.env`。`kaka-core`、`qq-adapter` 和 `scripts/doctor.py` 都按 `utf-8-sig` 读取环境文件，避免 Windows 编辑器保存 BOM 后导致首个配置项读不到。
+- GitHub 远程仓库按 public framework 方式维护：公开仓库只放框架代码、协议、适配器、普通技术文档和配置模板；本地运行数据、私有 Prompt、交接记录和内部计划不提交。
 - 2026-06-01 工程健康整理：已补 `LLM_REQUEST_TIMEOUT`、桌宠连接/身份配置、Prompt 数据边界、记忆检索常驻偏好收敛、Tauri CSP、桌宠贴图懒加载缓存，并把桌宠窗口辅助逻辑和 Web 管理台 API/类型定义拆出，降低后续维护成本。
 - 管理 API：`/admin/api/*`，默认只允许本机访问；如果设置 `ADMIN_LOCAL_ONLY=false`，必须配置 `ADMIN_API_TOKEN` 并在请求头传 `X-Kaka-Admin-Token`。Web 管理台顶部的“管理 Token”输入框会把 token 暂存在当前浏览器会话里并自动带到 API 请求里。核心代码在 `services/kaka-core/src/kaka_core/api/admin_routes.py` 和 `services/kaka-core/src/kaka_core/admin/service.py`；总览里展示的数据库连接串会自动脱敏。后续面向用户的数据管理功能优先扩展这里。
-- 基础人设 Prompt 文件：`prompts/kaka_persona.md` 会作为回复时 System Prompt 的基础层；关系上下文和长期记忆会在它之后动态追加。路径可用 `KAKA_PERSONA_PROMPT_PATH` 调整，文件缺失时会回退到内置基础人设。2026-05-23 已更新为第一版电子猫娘运行 Prompt；2026-05-24 已用真实 SQLite 测试输入、真实 DeepSeek 调用和真实 QQ 群聊做多轮小样本人设回放。当前运行版强调甜、亲近、嘴硬心软、短但不冷、无动作描写、不过度模仿其他 bot、不对同群 bot 或开发者表现敌意。
-- 人设方向文档：`docs/卡咔人设设定.md` 保存“电波系观测者 · 电子猫娘”长期人设底稿，不作为运行 Prompt 直接注入；`docs/卡咔场景反应样例.md` 保存 20 个典型小剧场反应样例；`docs/卡咔负面情绪处理规则.md` 保存负面情绪下的“卖萌缓冲 / 陪住 / 不心理辅导”风格规则。
-- 2026-05-19 已按当时要求回退强化人设实验：删除三层人格定义和人设评测脚本，清理评测数据；2026-05-23 在保留干净工程地基的前提下，重新把用户认可的长期人设底稿、场景样例和负面情绪缓冲规则纳入文档，并更新运行 Prompt；2026-05-24 已完成真实 LLM 小样本人设回放，测试输入均已标记 `skipped`，不进入长期记忆候选分析。后续明确拆分：完整人设作为 IP/角色设定继续发展，运行人设作为群聊机器人人格继续小步调优。
+- 基础人设 Prompt 可通过 `KAKA_PERSONA_PROMPT_PATH` 指向本地私有文件；未配置或文件缺失时会回退到代码内置基础人设。关系上下文、长期记忆和短期上下文会在基础层之后动态追加。
 - 回复前关系上下文：`kaka-core` 现在只用 `KAKA_OWNER_USER_IDS` 区分两档关系：`special`（创造者大人）和 `normal`（普通群友）。不再按历史输入、最近输入或记忆数量推断熟悉度；熟悉感交给短期上下文和长期记忆自然表达，避免关系层把普通群友推成多级身份。
 - 长期记忆 E2E 测试造数脚本：`seed_memory_e2e_data.py` 只用于本地测试，默认预览，加 `--apply` 才写入测试输入。
 - 程序内置自动候选分析：可选开启后，`kaka-core` 在下一个整点及之后每个整点检查一次；`not_analyzed >= 50` 时最多处理两轮，每轮 50 条；每次检查会写入 `auto_job_runs`。运行状态页可手动触发一次，手动触发会绕过数量门槛。
@@ -111,7 +116,7 @@ QQ 收到消息
 - `scripts/doctor.py` 本地自检脚本。
 - 项目专用虚拟环境 `.venv`。
 - 根目录 `.env` 本地配置文件。
-- 基础文档和开发日志。
+- 公开说明文档和配置模板。
 
 当前已经跑通：
 
@@ -210,18 +215,17 @@ kaka-v2/
 如果是第一次看这个项目，建议按这个顺序读：
 
 1. `README.md`
-2. `KAKA_HANDOFF.md`
-3. `docs/下次上下文.md`
-4. `docs/开发运行说明.md`
-5. `docs/桌宠开发说明.md`
-6. `docs/路线图.md`
-7. `docs/长期记忆设计.md`
-8. `docs/技术栈说明.md`
-9. `卡咔电子生命系统设计文档.md`
+2. `docs/开发运行说明.md`
+3. `docs/运行手册.md`
+4. `docs/API文档.md`
+5. `docs/插件开发指南.md`
+6. `docs/桌面操作能力说明.md`
+7. `docs/桌宠开发说明.md`
+8. `docs/部署指南.md`
 
 命名约定：
 
-- 关键入口文档保留英文名：`README.md`、`KAKA_HANDOFF.md`。
+- 关键入口文档保留英文名：`README.md`。
 - `docs/` 下的说明类文档使用中文名。
 - 文件夹、Python 包、模块、脚本和配置文件继续保持英文名。
 
@@ -262,7 +266,7 @@ inputs / outputs 记录正常
 最近对话筛选查看正常
 ```
 
-当前已经完成“回复时读取正式长期记忆”的第一版接入：`search_memories.py` 的检索逻辑已经抽成正式模块，`kaka-core` 回复前会按当前用户、场景和消息检索少量 `active` 记忆，并把命中的记忆作为可参考背景放进模型 prompt。当前也已接入第一版短期上下文，默认读取同场景最近 30 分钟内最多 20 条输入记录，总字符上限 1200，排除当前消息。回复前还会注入简化后的关系上下文，只区分 `special`（创造者大人）和 `normal`（普通群友），不再按互动次数做多级关系判断。基础人设已经从代码拆到 `prompts/kaka_persona.md`，当前运行版强调甜甜的电子猫娘群友、短但不冷、嘴硬心软、无动作描写、不过度续写小剧场、同群 bot 友好共存和创造者大人特殊关系；更完整的人设方向、场景样例和负面情绪缓冲规则分别沉淀在 `docs/卡咔人设设定.md`、`docs/卡咔场景反应样例.md` 和 `docs/卡咔负面情绪处理规则.md`。2026-05-24 已用真实 DeepSeek 和真实 QQ 群聊回放过摸头、被叫 AI、负面情绪、技术问题、记忆缺失、同群 bot 互动和短期上下文带偏等场景，并据此微调运行 Prompt。回复上下文内部已经分为 `persona / relationship / memory / recent_context / current_message` 层，方便后续继续接入用户画像和情绪状态。长期记忆、短期上下文和人设路径都可通过 `.env` 调整；关系层只保留 `KAKA_OWNER_USER_IDS`。程序里也已经内置自动候选分析和自动候选区复核，两者都在整点触发；运行状态页可以手动触发一次，跨进程任务锁会避免重复执行。
+当前已经完成“回复时读取正式长期记忆”的第一版接入：`search_memories.py` 的检索逻辑已经抽成正式模块，`kaka-core` 回复前会按当前用户、场景和消息检索少量 `active` 记忆，并把命中的记忆作为可参考背景放进模型 prompt。当前也已接入第一版短期上下文，默认读取同场景最近 30 分钟内最多 20 条输入记录，总字符上限 1200，排除当前消息。回复前还会注入简化后的关系上下文，只区分 `special`（创造者大人）和 `normal`（普通群友），不再按互动次数做多级关系判断。基础人设可通过本地私有 Prompt 文件配置，未配置时使用内置基础人设；回复上下文内部已经分为 `persona / relationship / memory / recent_context / current_message` 层，方便后续继续接入用户画像和情绪状态。长期记忆、短期上下文和人设路径都可通过 `.env` 调整；关系层只保留 `KAKA_OWNER_USER_IDS`。程序里也已经内置自动候选分析和自动候选区复核，两者都在整点触发；运行状态页可以手动触发一次，跨进程任务锁会避免重复执行。
 
 当前也已经完成本地 Web 管理台第一版接入并完成了页面命名和布局收敛。用户日常查看系统总览、管理正式记忆、做提示预演、回看对话复盘和检查运行状态，优先使用 `/admin`；正式记忆可以在页面内倒序分页查看、新增、编辑、归档、恢复和删除。最近对话、输入分析、候选区等后台能力仍保留在 API、脚本和数据库中，Python 脚本主要留给开发、测试、批量修复和应急排查。
 
@@ -272,7 +276,7 @@ inputs / outputs 记录正常
 
 1. 默认最多取 5 条高分 `active` 记忆。
 2. 默认最多取最近 30 分钟内 20 条同场景短期上下文。
-3. 基础人设来自 `prompts/kaka_persona.md`，动态关系和记忆会追加在后面。
+3. 基础人设来自 `KAKA_PERSONA_PROMPT_PATH` 指向的本地文件；未配置时使用内置基础人设，动态关系和记忆会追加在后面。
 4. 记忆和短期上下文只是背景，不强迫模型主动提起或机械复述。
 5. 响应 metadata 会记录 `context_layer_names`、`persona_prompt_source`、`used_memory_ids`、`memory_count`、`memory_injection_enabled`、`short_context_input_ids`、`short_context_count`、`relationship_level` 和 `relationship_is_owner`。
 6. 后续情绪、用户画像和更细关系维度应继续接入 `kaka_core.context.builder`，不要散落在聊天服务里。

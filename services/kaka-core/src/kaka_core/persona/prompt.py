@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from kaka_core.config.settings import PersonaSettings
@@ -29,6 +30,7 @@ class PersonaPrompt:
     error: str | None = None
 
 
+@lru_cache(maxsize=4)
 def load_persona_prompt(settings: PersonaSettings) -> PersonaPrompt:
     """读取基础人设 Prompt。
 

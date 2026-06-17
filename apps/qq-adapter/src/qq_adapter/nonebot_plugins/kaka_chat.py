@@ -5,6 +5,7 @@ from nonebot.adapters.onebot.v11 import (
     Bot,
     GroupMessageEvent,
     MessageEvent as OneBotMessageEvent,
+    MessageSegment,
     PrivateMessageEvent,
 )
 
@@ -55,18 +56,6 @@ async def handle_kaka_message(bot: Bot, event: OneBotMessageEvent) -> None:
 
     for action in actions:
         await _send_text_action(bot, event, action)
-
-
-def _should_handle_message(bot: Bot, event: OneBotMessageEvent) -> bool:
-    """判断当前消息是否应该交给卡咔回复。
-
-    第一阶段规则：
-    - 私聊全部回复。
-    - 群聊只有 @ 机器人或文本里包含“卡咔”时回复。
-    """
-
-    handling = _classify_message_handling(bot, event)
-    return handling.should_reply if handling else False
 
 
 class MessageHandling:
@@ -216,15 +205,29 @@ async def _send_text_action(
 ) -> None:
     """执行卡咔核心服务返回的文本发送动作。"""
 
+    # 用 MessageSegment.text 包裹纯文本，避免 OneBot V11 把回复里的
+    # [CQ:at,qq=all] / [CQ:image,...] 等内容当成 CQ 码执行。
+    text_segment = MessageSegment.text(action.text)
+
     if isinstance(event, GroupMessageEvent):
-        await bot.send_group_msg(group_id=int(action.scene_id), message=action.text)
+        try:
+            group_id = int(action.scene_id)
+        except (TypeError, ValueError):
+            await bot.send(event, text_segment, at_sender=False)
+            return
+        await bot.send_group_msg(group_id=group_id, message=text_segment)
         return
 
     if isinstance(event, PrivateMessageEvent):
-        await bot.send_private_msg(user_id=int(action.scene_id), message=action.text)
+        try:
+            user_id = int(action.scene_id)
+        except (TypeError, ValueError):
+            await bot.send(event, text_segment, at_sender=False)
+            return
+        await bot.send_private_msg(user_id=user_id, message=text_segment)
         return
 
-    await bot.send(event, action.text, at_sender=False)
+    await bot.send(event, text_segment, at_sender=False)
 
 
 async def send_notification_request(bot: Bot, request: NotificationRequest) -> None:

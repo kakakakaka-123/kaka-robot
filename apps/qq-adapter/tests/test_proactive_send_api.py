@@ -25,16 +25,25 @@ def clear_settings_cache() -> Iterator[None]:
         get_settings.cache_clear()
 
 
+def _message_to_text(message: object) -> str:
+    """把 MessageSegment 或纯字符串统一成文本，方便断言发送内容。"""
+
+    data = getattr(message, "data", None)
+    if isinstance(data, dict) and "text" in data:
+        return str(data["text"])
+    return str(message)
+
+
 class FakeBot:
     def __init__(self) -> None:
         self.group_messages: list[tuple[int, str]] = []
         self.private_messages: list[tuple[int, str]] = []
 
-    async def send_group_msg(self, *, group_id: int, message: str) -> None:
-        self.group_messages.append((group_id, message))
+    async def send_group_msg(self, *, group_id: int, message: object) -> None:
+        self.group_messages.append((group_id, _message_to_text(message)))
 
-    async def send_private_msg(self, *, user_id: int, message: str) -> None:
-        self.private_messages.append((user_id, message))
+    async def send_private_msg(self, *, user_id: int, message: object) -> None:
+        self.private_messages.append((user_id, _message_to_text(message)))
 
 
 def make_request(
@@ -133,7 +142,7 @@ def test_send_api_accepts_valid_token_before_rejecting_malformed_body(monkeypatc
 
 
 def test_send_api_returns_503_when_token_unconfigured(monkeypatch) -> None:
-    monkeypatch.delenv("QQ_ADAPTER_SEND_TOKEN", raising=False)
+    monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "")
     fake_bot = FakeBot()
     client = TestClient(create_send_api(lambda: fake_bot))
 
@@ -144,7 +153,7 @@ def test_send_api_returns_503_when_token_unconfigured(monkeypatch) -> None:
 
 
 def test_send_api_returns_503_when_token_unconfigured_before_body_validation(monkeypatch) -> None:
-    monkeypatch.delenv("QQ_ADAPTER_SEND_TOKEN", raising=False)
+    monkeypatch.setenv("QQ_ADAPTER_SEND_TOKEN", "")
     fake_bot = FakeBot()
     client = TestClient(create_send_api(lambda: fake_bot))
 
@@ -308,3 +317,22 @@ async def test_sender_sends_group_text_without_api_dependency() -> None:
     await send_notification_request(fake_bot, make_request())
 
     assert fake_bot.group_messages == [(20002, "GitHub weekly stars")]
+
+
+@pytest.mark.anyio
+async def test_sender_escapes_cq_codes_in_text() -> None:
+    """通知文本里的 CQ 码必须被当作纯文本，不能触发 @全体 等行为。"""
+
+    fake_bot = FakeBot()
+    payload = "[CQ:at,qq=all] 大家看周报"
+
+    await send_notification_request(
+        fake_bot,
+        make_request(text=payload),
+    )
+
+    # 发出的应是 MessageSegment.text，data.text 保留原始文本，不被解析成 CQ 码。
+    assert len(fake_bot.group_messages) == 1
+    group_id, sent_text = fake_bot.group_messages[0]
+    assert group_id == 20002
+    assert sent_text == payload

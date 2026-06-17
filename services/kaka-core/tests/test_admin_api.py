@@ -28,8 +28,12 @@ def create_test_client(monkeypatch, tmp_path, *, local_only: str = "true", token
     if token:
         monkeypatch.setenv("ADMIN_API_TOKEN", token)
     else:
-        monkeypatch.delenv("ADMIN_API_TOKEN", raising=False)
+        monkeypatch.setenv("ADMIN_API_TOKEN", "")
     get_settings.cache_clear()
+    # Starlette TestClient 上报对端地址为 "testclient"，测试里注入进可信集合
+    # 而不是把它写进生产代码。
+    from kaka_core.api import admin_routes
+    monkeypatch.setattr(admin_routes, "LOCAL_CLIENT_HOSTS", {"127.0.0.1", "::1", "localhost", "testclient"})
     init_database()
     seed_admin_data()
     return TestClient(create_app())
@@ -510,6 +514,20 @@ def test_admin_api_requires_token_when_local_only_disabled(monkeypatch, tmp_path
 
     assert response.status_code == 403
     assert response.json()["detail"] == "admin api token is required when local-only is disabled"
+
+
+def test_admin_api_local_only_rejects_proxied_requests(monkeypatch, tmp_path):
+    client = create_test_client(monkeypatch, tmp_path, local_only="true")
+
+    # 反代与后端同机时 request.client.host 恒为 127.0.0.1，但请求带转发头，
+    # 说明它来自代理后的外部访问，local-only 必须拒绝而不是放行。
+    response = client.get(
+        "/admin/api/summary",
+        headers={"X-Forwarded-For": "203.0.113.7"},
+    )
+
+    assert response.status_code == 403
+    assert "behind a proxy" in response.json()["detail"]
 
 
 def test_admin_api_accepts_configured_token(monkeypatch, tmp_path):

@@ -67,24 +67,38 @@ def load_short_context(
         conditions.append(InputRecord.created_at >= threshold)
 
     rows = session.execute(
-        select(InputRecord, UserRecord, OutputRecord)
+        select(InputRecord, UserRecord)
         .join(UserRecord, InputRecord.user_id == UserRecord.id)
         .join(SceneRecord, InputRecord.scene_id == SceneRecord.id)
-        .outerjoin(OutputRecord, OutputRecord.input_id == InputRecord.id)
         .where(*conditions)
         .order_by(InputRecord.created_at.desc(), InputRecord.id.desc())
         .limit(limit * 3)
     ).all()
 
+    # 单独按 input_id 批量取回复，而不是在主查询里 outerjoin OutputRecord。
+    # outerjoin 在一条输入有多条输出时会把行数翻倍、并让命中的回复变得不确定；
+    # 这里每条输入只保留最新一条回复，结果稳定且与输出数量无关。
+    input_ids = [input_record.id for input_record, _ in rows]
+    outputs_by_input: dict[int, OutputRecord] = {}
+    if input_ids:
+        output_rows = session.execute(
+            select(OutputRecord)
+            .where(OutputRecord.input_id.in_(input_ids))
+            .order_by(OutputRecord.created_at.desc(), OutputRecord.id.desc())
+        ).scalars()
+        for output in output_rows:
+            outputs_by_input.setdefault(output.input_id, output)
+
     selected: list[ShortContextItem] = []
     used_chars = 0
     seen_input_ids: set[int] = set()
-    for input_record, user, output in rows:
+    for input_record, user in rows:
         if input_record.id in seen_input_ids:
             continue
         user_text = normalize_context_text(input_record.content_text)
         if not user_text:
             continue
+        output = outputs_by_input.get(input_record.id)
         kaka_text = normalize_context_text(output.content_text) if output is not None else None
         item_chars = len(user_text) + len(kaka_text or "")
         if selected and used_chars + item_chars > max_chars:

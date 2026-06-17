@@ -53,6 +53,9 @@ CANDIDATE_STATUS_PENDING = "pending"
 CANDIDATE_STATUS_APPROVED = "approved"
 CANDIDATE_STATUS_DUPLICATE = "merged_duplicate"
 CANDIDATE_STATUS_REJECTED = "rejected"
+# LLM 复核失败的候选会落到这个终态，不再保持 pending 被每个整点反复重投。
+# 候选数据仍保留，可在 /admin 查看，必要时手动改回 pending 重新复核。
+CANDIDATE_STATUS_ERROR = "review_error"
 
 VALID_ACTIONS = {"approve", "reject", "duplicate", "error"}
 VALID_MEMORY_TYPES = {
@@ -818,6 +821,10 @@ def apply_decisions(session: Session, decisions: list[ReviewDecision]) -> Review
             candidate.status = CANDIDATE_STATUS_REJECTED
             stats.rejected += 1
         else:
+            # action == "error"：LLM 调用失败或没返回该 candidate_id。
+            # batch 内部已做过二分重试，到这里仍失败就落到终态，避免每个整点
+            # 反复重投同一条候选。候选数据保留，可在 /admin 手动改回 pending。
+            candidate.status = CANDIDATE_STATUS_ERROR
             stats.errors += 1
     return stats
 

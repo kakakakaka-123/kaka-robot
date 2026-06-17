@@ -11,6 +11,12 @@ from kaka_core.storage.models import Base
 _DATABASE_INIT_LOCK = threading.Lock()
 _INITIALIZED_DATABASE_URLS: set[str] = set()
 
+# 按数据库 URL 缓存 Engine（含连接池），避免每次请求/任务都新建并泄漏连接。
+_ENGINE_CACHE_LOCK = threading.Lock()
+_ENGINE_CACHE: dict[str, Engine] = {}
+# 按 Engine 缓存 sessionmaker，sessionmaker 本身无状态，复用即可。
+_SESSION_FACTORY_CACHE: dict[int, "sessionmaker[Session]"] = {}
+
 EXPECTED_INPUT_COLUMNS = [
     "id",
     "event_id",
@@ -91,17 +97,53 @@ EXPECTED_AUTO_JOB_RUN_COLUMNS = [
     "created_at",
 ]
 
+EXPECTED_DESKTOP_OPERATION_COLUMNS = [
+    "id",
+    "operation_type",
+    "params",
+    "requester_user_id",
+    "requester_scene_id",
+    "requester_scene_type",
+    "requester_platform",
+    "approved",
+    "decision_reason",
+    "kaka_mood",
+    "status",
+    "result",
+    "error_message",
+    "created_at",
+    "started_at",
+    "completed_at",
+    "permission_level",
+]
+
 
 def create_database_engine(database_url: str | None = None) -> Engine:
-    """创建数据库引擎，并确保本地数据库文件所在目录存在。"""
+    """获取数据库引擎，并确保本地数据库文件所在目录存在。
+
+    Engine 自带连接池，必须按 URL 复用单一实例，否则每次请求/后台任务都新建
+    一个连接池且永不释放，会造成连接和文件句柄泄漏。这里按 URL 缓存复用。
+    """
 
     url = database_url or get_settings().database.url
-    if url.startswith("sqlite:///"):
-        db_path = Path(url.removeprefix("sqlite:///"))
-        db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    return create_engine(url, connect_args=connect_args)
+    cached = _ENGINE_CACHE.get(url)
+    if cached is not None:
+        return cached
+
+    with _ENGINE_CACHE_LOCK:
+        cached = _ENGINE_CACHE.get(url)
+        if cached is not None:
+            return cached
+
+        if url.startswith("sqlite:///"):
+            db_path = Path(url.removeprefix("sqlite:///"))
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
+        engine = create_engine(url, connect_args=connect_args)
+        _ENGINE_CACHE[url] = engine
+        return engine
 
 
 def init_database(engine: Engine | None = None) -> None:
@@ -247,6 +289,10 @@ def migrate_sqlite_schema(engine: Engine) -> None:
         if "auto_job_runs" in table_names and should_rebuild_auto_job_runs_table(connection):
             rebuild_auto_job_runs_table(connection)
 
+        table_names = get_sqlite_table_names(connection)
+        if "desktop_operations" in table_names and should_rebuild_desktop_operations_table(connection):
+            rebuild_desktop_operations_table(connection)
+
         create_sqlite_indexes(connection)
 
 
@@ -303,6 +349,13 @@ def should_rebuild_auto_job_runs_table(connection) -> bool:
 
     columns = get_sqlite_ordered_column_names(connection, "auto_job_runs")
     return columns != EXPECTED_AUTO_JOB_RUN_COLUMNS
+
+
+def should_rebuild_desktop_operations_table(connection) -> bool:
+    """判断 desktop_operations 是否需要重建。"""
+
+    columns = get_sqlite_ordered_column_names(connection, "desktop_operations")
+    return columns != EXPECTED_DESKTOP_OPERATION_COLUMNS
 
 
 def rebuild_inputs_table(connection) -> None:
@@ -687,6 +740,91 @@ def rebuild_auto_job_runs_table(connection) -> None:
     connection.execute(text("ALTER TABLE auto_job_runs__new RENAME TO auto_job_runs"))
 
 
+def rebuild_desktop_operations_table(connection) -> None:
+    """重建 desktop_operations 表，补齐 requester_scene_type 并固定字段顺序。"""
+
+    old_columns = get_sqlite_column_names(connection, "desktop_operations")
+    connection.execute(text("DROP TABLE IF EXISTS desktop_operations__new"))
+    connection.execute(
+        text(
+            """
+            CREATE TABLE desktop_operations__new (
+                id INTEGER NOT NULL,
+                operation_type VARCHAR(64) NOT NULL,
+                params JSON NOT NULL,
+                requester_user_id VARCHAR(128) NOT NULL,
+                requester_scene_id VARCHAR(128) NOT NULL,
+                requester_scene_type VARCHAR(32) NOT NULL DEFAULT 'private',
+                requester_platform VARCHAR(32) NOT NULL,
+                approved BOOLEAN NOT NULL,
+                decision_reason TEXT,
+                kaka_mood VARCHAR(32),
+                status VARCHAR(32) NOT NULL,
+                result JSON,
+                error_message TEXT,
+                created_at DATETIME NOT NULL,
+                started_at DATETIME,
+                completed_at DATETIME,
+                permission_level INTEGER NOT NULL,
+                PRIMARY KEY (id)
+            )
+            """
+        )
+    )
+    select_scene_type = (
+        "requester_scene_type" if "requester_scene_type" in old_columns else "'private'"
+    )
+    select_created_at = (
+        "COALESCE(created_at, CURRENT_TIMESTAMP)" if "created_at" in old_columns else "CURRENT_TIMESTAMP"
+    )
+    connection.execute(
+        text(
+            f"""
+            INSERT INTO desktop_operations__new (
+                id,
+                operation_type,
+                params,
+                requester_user_id,
+                requester_scene_id,
+                requester_scene_type,
+                requester_platform,
+                approved,
+                decision_reason,
+                kaka_mood,
+                status,
+                result,
+                error_message,
+                created_at,
+                started_at,
+                completed_at,
+                permission_level
+            )
+            SELECT
+                id,
+                operation_type,
+                COALESCE(params, '{{}}'),
+                requester_user_id,
+                requester_scene_id,
+                {select_scene_type},
+                requester_platform,
+                COALESCE(approved, 1),
+                decision_reason,
+                kaka_mood,
+                COALESCE(NULLIF(status, ''), 'pending'),
+                result,
+                error_message,
+                {select_created_at},
+                started_at,
+                completed_at,
+                COALESCE(permission_level, 1)
+            FROM desktop_operations
+            """
+        )
+    )
+    connection.execute(text("DROP TABLE desktop_operations"))
+    connection.execute(text("ALTER TABLE desktop_operations__new RENAME TO desktop_operations"))
+
+
 def create_sqlite_indexes(connection) -> None:
     """补齐当前查询会用到的 SQLite 索引。"""
 
@@ -780,6 +918,23 @@ def create_sqlite_indexes(connection) -> None:
             text("CREATE INDEX IF NOT EXISTS ix_auto_job_runs_finished_at ON auto_job_runs (finished_at)")
         )
 
+    if "desktop_operations" in table_names:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_desktop_operations_operation_type "
+                "ON desktop_operations (operation_type)"
+            )
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_desktop_operations_status ON desktop_operations (status)")
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_desktop_operations_created_at "
+                "ON desktop_operations (created_at)"
+            )
+        )
+
 
 def get_sqlite_table_names(connection) -> set[str]:
     """读取 SQLite 当前表名。"""
@@ -835,10 +990,25 @@ def has_unique_index_on_columns(connection, table_name: str, columns: list[str])
 
 
 def create_session_factory(engine: Engine | None = None) -> sessionmaker[Session]:
-    """创建数据库会话工厂。"""
+    """获取数据库会话工厂。
+
+    sessionmaker 无状态，可安全复用。按底层 Engine 缓存，避免每次调用都新建。
+    """
 
     target_engine = engine or create_database_engine()
-    return sessionmaker(bind=target_engine, autoflush=False, expire_on_commit=False)
+    engine_key = id(target_engine)
+
+    cached = _SESSION_FACTORY_CACHE.get(engine_key)
+    if cached is not None:
+        return cached
+
+    with _ENGINE_CACHE_LOCK:
+        cached = _SESSION_FACTORY_CACHE.get(engine_key)
+        if cached is not None:
+            return cached
+        factory = sessionmaker(bind=target_engine, autoflush=False, expire_on_commit=False)
+        _SESSION_FACTORY_CACHE[engine_key] = factory
+        return factory
 
 
 def get_session() -> Iterator[Session]:

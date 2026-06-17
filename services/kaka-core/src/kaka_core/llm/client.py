@@ -58,7 +58,7 @@ class LLMClient:
 
         if response.status_code >= 400:
             raise LLMClientError(
-                f"LLM 请求失败：HTTP {response.status_code} {response.text}"
+                f"LLM 请求失败：HTTP {response.status_code} {response.text[:200]}"
             )
 
         data = response.json()

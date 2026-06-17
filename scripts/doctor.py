@@ -111,6 +111,25 @@ EXPECTED_AUTO_JOB_RUN_COLUMNS = [
     "finished_at",
     "created_at",
 ]
+EXPECTED_DESKTOP_OPERATION_COLUMNS = [
+    "id",
+    "operation_type",
+    "params",
+    "requester_user_id",
+    "requester_scene_id",
+    "requester_scene_type",
+    "requester_platform",
+    "approved",
+    "decision_reason",
+    "kaka_mood",
+    "status",
+    "result",
+    "error_message",
+    "created_at",
+    "started_at",
+    "completed_at",
+    "permission_level",
+]
 
 
 @dataclass(frozen=True)
@@ -141,7 +160,7 @@ def parse_env_file(path: Path) -> dict[str, str]:
     if not path.exists():
         return values
 
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -170,7 +189,6 @@ def check_project_layout(results: list[CheckResult]) -> None:
         ROOT / "packages" / "kaka-protocol",
         ROOT / "services" / "kaka-core",
         ROOT / "apps" / "qq-adapter",
-        ROOT / "prompts" / "kaka_persona.md",
         ROOT / "docs" / "运行手册.md",
         ROOT / "services" / "kaka-core" / "run.py",
         ROOT / "apps" / "qq-adapter" / "bot.py",
@@ -180,6 +198,16 @@ def check_project_layout(results: list[CheckResult]) -> None:
             ok(results, f"存在 {path.relative_to(ROOT)}", "已找到")
         else:
             fail(results, f"缺少 {path.relative_to(ROOT)}", "必需的项目文件不存在")
+
+    persona_prompt = ROOT / "prompts" / "kaka_persona.md"
+    if persona_prompt.exists():
+        ok(results, f"存在 {persona_prompt.relative_to(ROOT)}", "已找到")
+    else:
+        warn(
+            results,
+            f"缺少 {persona_prompt.relative_to(ROOT)}",
+            "未找到私有 Prompt 文件；聊天会回退到内置基础人设",
+        )
 
 
 def check_python(results: list[CheckResult]) -> None:
@@ -226,7 +254,7 @@ def check_env_template(results: list[CheckResult]) -> None:
 def check_env_file(results: list[CheckResult]) -> dict[str, str]:
     env_path = ROOT / ".env"
     if not env_path.exists():
-        fail(results, ".env", "未找到 .env；复制 .env.example 后填写本地配置")
+        warn(results, ".env", "未找到 .env；复制 .env.example 后填写本地配置")
         return {}
 
     ok(results, ".env", "存在；只检查字段，不打印任何密钥")
@@ -343,6 +371,31 @@ def check_env_file(results: list[CheckResult]) -> dict[str, str]:
     else:
         warn(results, "KAKA_CORE_BASE_URL", f"不是当前推荐值: {core_url}")
 
+    check_bool_value(
+        results,
+        "PLUGIN_SYSTEM_ENABLED",
+        values.get("PLUGIN_SYSTEM_ENABLED", "false"),
+    )
+    check_url_value(
+        results,
+        "PLUGIN_60S_BASE_URL",
+        values.get("PLUGIN_60S_BASE_URL", "https://60s.viki.moe"),
+    )
+    check_float_value(
+        results,
+        "PLUGIN_60S_TIMEOUT",
+        values.get("PLUGIN_60S_TIMEOUT", "15"),
+    )
+    check_url_value(
+        results,
+        "PLUGIN_GITHUB_API_BASE_URL",
+        values.get("PLUGIN_GITHUB_API_BASE_URL", "https://api.github.com"),
+    )
+    check_float_value(
+        results,
+        "PLUGIN_GITHUB_TIMEOUT",
+        values.get("PLUGIN_GITHUB_TIMEOUT", "15"),
+    )
     check_float_value(
         results,
         "QQ_ADAPTER_REQUEST_TIMEOUT",
@@ -460,7 +513,7 @@ def check_database_url(results: list[CheckResult], database_url: str | None) -> 
 def check_persona_prompt_path(results: list[CheckResult], value: str) -> None:
     raw_path = str(value or "").strip()
     if not raw_path:
-        fail(results, "KAKA_PERSONA_PROMPT_PATH", "不能为空")
+        warn(results, "KAKA_PERSONA_PROMPT_PATH", "未配置，将使用内置基础人设")
         return
 
     prompt_path = Path(raw_path)
@@ -516,22 +569,12 @@ def check_sqlite_schema(results: list[CheckResult], db_path: Path) -> None:
     try:
         with sqlite3.connect(db_path) as conn:
             rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-            input_columns = {
-                str(row[1])
-                for row in conn.execute("PRAGMA table_info(inputs)").fetchall()
-            }
-            ordered_input_columns = [
-                str(row[1])
-                for row in conn.execute("PRAGMA table_info(inputs)").fetchall()
-            ]
-            output_columns = {
-                str(row[1])
-                for row in conn.execute("PRAGMA table_info(outputs)").fetchall()
-            }
-            ordered_output_columns = [
-                str(row[1])
-                for row in conn.execute("PRAGMA table_info(outputs)").fetchall()
-            ]
+            _inputs_info = conn.execute("PRAGMA table_info(inputs)").fetchall()
+            input_columns = {str(r[1]) for r in _inputs_info}
+            ordered_input_columns = [str(r[1]) for r in _inputs_info]
+            _outputs_info = conn.execute("PRAGMA table_info(outputs)").fetchall()
+            output_columns = {str(r[1]) for r in _outputs_info}
+            ordered_output_columns = [str(r[1]) for r in _outputs_info]
             ordered_candidate_columns = [
                 str(row[1])
                 for row in conn.execute("PRAGMA table_info(memory_candidates)").fetchall()
@@ -543,6 +586,10 @@ def check_sqlite_schema(results: list[CheckResult], db_path: Path) -> None:
             ordered_auto_job_run_columns = [
                 str(row[1])
                 for row in conn.execute("PRAGMA table_info(auto_job_runs)").fetchall()
+            ]
+            ordered_desktop_operation_columns = [
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(desktop_operations)").fetchall()
             ]
     except sqlite3.Error as exc:
         fail(results, "SQLite 文件", f"无法打开: {exc}")
@@ -579,6 +626,15 @@ def check_sqlite_schema(results: list[CheckResult], db_path: Path) -> None:
         warn(
             results,
             "auto_job_runs 表",
+            "尚不存在；启动 kaka-core 初始化数据库后会自动创建",
+        )
+
+    if "desktop_operations" in table_names:
+        ok(results, "desktop_operations 表", "存在")
+    else:
+        warn(
+            results,
+            "desktop_operations 表",
             "尚不存在；启动 kaka-core 初始化数据库后会自动创建",
         )
 
@@ -669,6 +725,18 @@ def check_sqlite_schema(results: list[CheckResult], db_path: Path) -> None:
         warn(
             results,
             "auto_job_runs 字段顺序",
+            "当前顺序与模型不一致；启动 kaka-core 后会自动整理",
+        )
+
+    if "desktop_operations" not in table_names:
+        return
+
+    if ordered_desktop_operation_columns == EXPECTED_DESKTOP_OPERATION_COLUMNS:
+        ok(results, "desktop_operations 字段顺序", "符合当前模型")
+    else:
+        warn(
+            results,
+            "desktop_operations 字段顺序",
             "当前顺序与模型不一致；启动 kaka-core 后会自动整理",
         )
 

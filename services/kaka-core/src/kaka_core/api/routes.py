@@ -1,4 +1,5 @@
 from json import JSONDecodeError
+from secrets import compare_digest
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import ValidationError
@@ -29,7 +30,7 @@ def _require_notification_token(authorization: str | None) -> None:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="notification token is not configured",
         )
-    if authorization != f"Bearer {token}":
+    if not authorization or not compare_digest(authorization, f"Bearer {token}"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid notification token",
@@ -73,6 +74,6 @@ async def notify(
         ) from exc
 
     try:
-        return deliver_notification(notification, settings.notifications)
+        return await deliver_notification(notification, settings.notifications)
     except NotificationDeliveryError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

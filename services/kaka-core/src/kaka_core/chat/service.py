@@ -1,5 +1,6 @@
 import asyncio
 import re
+import time
 from dataclasses import dataclass
 
 from kaka_core.config.settings import PluginSettings, get_settings
@@ -31,6 +32,17 @@ _event_lock_guard = asyncio.Lock()
 _event_locks: dict[str, EventLockState] = {}
 EVENT_PROCESSING_LOCK_LEASE_SECONDS = 300
 EVENT_PROCESSING_LOCK_POLL_SECONDS = 0.25
+# 跨进程轮询等待已有输出的最长时间，避免另一进程持锁卡死时请求无限期阻塞。
+EVENT_PROCESSING_WAIT_TIMEOUT_SECONDS = 30.0
+
+
+class EventDedupError(RuntimeError):
+    """去重相关的数据库查询失败时抛出。
+
+    去重查询出错时不能静默当作"没有已有输出/锁"继续往下走，否则重放的
+    event_id 会再次调用 LLM 并重复发消息。这里显式抛错，让上层 fail-closed。
+    """
+
 
 
 def generate_fallback_response(event: MessageEvent, reason: str | None = None) -> KakaResponse:
@@ -126,6 +138,9 @@ def load_existing_response_safely(event: MessageEvent) -> KakaResponse | None:
 
     QQ 侧可能重放同一 message_id。这里在调用 LLM 之前先查库，避免重复消费
     模型额度和重复写 outputs。
+
+    查不到已有输出时返回 None；数据库查询本身失败时抛 EventDedupError，
+    让上层 fail-closed，而不是把"查询失败"误当成"没有已有输出"继续生成。
     """
 
     try:
@@ -139,8 +154,8 @@ def load_existing_response_safely(event: MessageEvent) -> KakaResponse | None:
             if output is None:
                 return None
             return output_record_to_response(output, event_id=event.event_id)
-    except Exception:  # noqa: BLE001
-        return None
+    except Exception as exc:  # noqa: BLE001
+        raise EventDedupError(f"failed to load existing response: {exc}") from exc
 
 
 async def acquire_event_lock(event_id: str) -> EventLockState:
@@ -195,7 +210,15 @@ async def generate_chat_response(
     db_lock_owner: str | None = None
     try:
         async with lock_state.lock:
-            existing_response, db_lock_owner = await reserve_event_processing_turn(event)
+            try:
+                existing_response, db_lock_owner = await reserve_event_processing_turn(event)
+            except EventDedupError:
+                # 去重状态不确定时 fail-closed：不再生成新回复、不发消息，
+                # 避免重放的 event_id 触发重复 LLM 调用和重复发送。
+                return KakaResponse.no_reply(
+                    event_id=event.event_id,
+                    reason="dedup_unavailable",
+                )
             if existing_response is not None:
                 return existing_response
 
@@ -254,9 +277,15 @@ async def reserve_event_processing_turn(event: MessageEvent) -> tuple[KakaRespon
 
     先检查数据库里是否已经有输出。如果没有，则尝试获取跨进程事件锁。
     没抢到时持续轮询，直到已有输出可复用或成功拿到锁。
+
+    去重查询或抢锁出现数据库错误时抛 EventDedupError，由上层 fail-closed，
+    避免把"查询失败"误当成"可以放心生成"。
+    轮询超过 EVENT_PROCESSING_WAIT_TIMEOUT_SECONDS 仍拿不到锁时也抛错，
+    避免另一个进程持锁卡死时请求被无限期阻塞。
     """
 
     lease_seconds = EVENT_PROCESSING_LOCK_LEASE_SECONDS
+    deadline = time.monotonic() + EVENT_PROCESSING_WAIT_TIMEOUT_SECONDS
     while True:
         existing_response = load_existing_response_safely(event)
         if existing_response is not None:
@@ -267,10 +296,15 @@ async def reserve_event_processing_turn(event: MessageEvent) -> tuple[KakaRespon
                 event.event_id,
                 lease_seconds=lease_seconds,
             )
-        except Exception:  # noqa: BLE001
-            return None, None
+        except Exception as exc:  # noqa: BLE001
+            raise EventDedupError(f"failed to acquire processing lock: {exc}") from exc
         if owner_token is not None:
             return None, owner_token
+
+        if time.monotonic() >= deadline:
+            raise EventDedupError(
+                "timed out waiting for another worker to finish processing this event"
+            )
 
         await asyncio.sleep(EVENT_PROCESSING_LOCK_POLL_SECONDS)
 
@@ -305,6 +339,11 @@ async def generate_plugin_response_if_available(
         command_prefixes=plugin_settings.command_prefixes,
         n8n_webhook_base_url=plugin_settings.n8n_webhook_base_url,
         n8n_webhook_timeout_seconds=plugin_settings.n8n_webhook_timeout_seconds,
+        s60_base_url=plugin_settings.s60_base_url,
+        s60_timeout_seconds=plugin_settings.s60_timeout_seconds,
+        github_api_base_url=plugin_settings.github_api_base_url,
+        github_timeout_seconds=plugin_settings.github_timeout_seconds,
+        github_token=plugin_settings.github_token,
     )
     result = await runtime.run_for_event(event)
     if result is None:
@@ -337,11 +376,14 @@ def sanitize_llm_reply(reply: str, *, scene: str, relationship_level: str) -> st
     text = strip_leading_stage_directions(text)
     text = strip_leading_bare_action_phrases(text)
     text = strip_forbidden_identity_prefix(text)
+    # 替换称呼时避免误伤后接 CJK 字符形成的复合词（如"主人公"、"大人物"）。
+    # 只要后面紧跟 CJK 字符就不替换；前面有 CJK 字符（如"好主人，"）仍正常替换。
+    _NO_CJK_AHEAD = r"(?![一-鿿])"
     if relationship_level == "special":
-        text = text.replace("主人", "创造者大人")
+        text = re.sub(rf"主人{_NO_CJK_AHEAD}", "创造者大人", text)
     else:
-        text = text.replace("主人", "群友")
-        text = text.replace("大人", "群友")
+        text = re.sub(rf"主人{_NO_CJK_AHEAD}", "群友", text)
+        text = re.sub(rf"大人{_NO_CJK_AHEAD}", "群友", text)
     text = strip_generic_service_tail(text)
     text = re.sub(r"\s+", " ", text).strip()
 
